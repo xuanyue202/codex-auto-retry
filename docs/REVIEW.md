@@ -59,3 +59,34 @@ The correction followed an actual second-machine observation of a new turn with
 an empty final message. It establishes that the verifier must distinguish routing
 from observed output. Even nonempty output does not by itself prove completed
 useful work or recovery from a genuine upstream outage.
+
+## 0.1.2 empty-output repair
+
+Both independent axes re-reviewed the full project through `b52f63a`, focusing
+on the repair for issue #1. The request now includes a fixed continuation
+instruction and a persisted recovery origin. It inherits the existing settings
+and does not replay the original prompt.
+
+### Standards
+
+The recovery-input exemption is consumed once and persisted across restart.
+Duplicate starts preserve the recovery identity without renewing the exemption.
+Later identical user input still cancels recovery. Lifecycle folding and the
+verifier deduplicate identical timestamped records. No remaining actionable
+standard violations or smell findings were identified.
+
+**Standards: repair findings resolved, 0 remaining; no outstanding worst issue.**
+
+### Spec
+
+Both repair findings are resolved: copied input cannot repeatedly bypass
+cancellation, and duplicate starts cannot lose the recovery identity. Retry
+counts, outage deadlines and inherited settings are preserved. No material scope
+expansion or additional spec mismatches were identified.
+
+**Spec: 2 repair findings resolved, 0 remaining material findings; no outstanding worst issue.**
+
+Validation: 95 synthetic tests, compilation and diff whitespace checks pass.
+The reviewers did not operate real services. Installed-release acceptance must
+separately show the automatic turn performing a guarded pending action; the
+earlier successful input-only experiment does not replace that evidence.
