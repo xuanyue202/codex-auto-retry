@@ -9,6 +9,7 @@ import struct
 import time
 import uuid
 from .storage import RecoveryError, AmbiguousDispatch
+from .recovery_input import CONTINUATION_TEXT, recovery_trigger
 
 
 def safe_socket(path):
@@ -136,13 +137,15 @@ class DesktopIPC:
             raise RecoveryError("thread_settings_unavailable")
         return settings
 
-    def continue_thread(self, tid, owner, model, effort):
+    def continue_thread(self, tid, owner, model, effort, *, recovery_id=None):
         # Inherit CWD, permissions, environment, provider and other existing settings
         # in the Desktop owner. Never map an unknown profile to full access.
+        identifier = recovery_id or str(uuid.uuid4())
         request = {
             "threadId": tid,
-            "input": [],
-            "clientUserMessageId": str(uuid.uuid4()),
+            "input": [{"type": "text", "text": CONTINUATION_TEXT, "text_elements": []}],
+            "clientUserMessageId": identifier,
+            "turnTrigger": recovery_trigger(identifier),
         }
         return self.request(
             "thread-follower-start-turn",

@@ -42,8 +42,9 @@ class FakeIPC:
             self.active_before_dispatch()
         return {"model": "original-model", "reasoningEffort": "high", "mode": "durable"}
 
-    def continue_thread(self, tid, owner, model, effort):
+    def continue_thread(self, tid, owner, model, effort, *, recovery_id=None):
         type(self).count += 1
+        type(self).last_recovery_id = recovery_id
         if self.fail:
             raise w.AmbiguousDispatch()
         return {"resultType": "success"}
@@ -410,7 +411,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.e.state["threads"][TID]["turn_id"], "new")
         self.assertFalse(self.e.state["jobs"])
 
-    def test_continuation_wire_inherits_settings_and_contains_no_prompt(self):
+    def test_continuation_wire_inherits_settings_and_has_execution_instruction(self):
         client = object.__new__(w.DesktopIPC)
         captured = []
         client.request = lambda *args, **kwargs: captured.append((args, kwargs)) or {
@@ -422,7 +423,15 @@ class RecoveryTests(unittest.TestCase):
         req = args[2]["turnStart"]["request"]
         ctx = args[2]["turnStart"]["context"]
         self.assertEqual(req["threadId"], TID)
-        self.assertEqual(req["input"], [])
+        self.assertEqual(len(req["input"]), 1)
+        self.assertEqual(req["input"][0]["type"], "text")
+        self.assertTrue(
+            req["input"][0]["text"].startswith("Continue the unfinished task")
+        )
+        self.assertEqual(req["input"][0]["text_elements"], [])
+        self.assertEqual(
+            req["turnTrigger"], "codex_auto_retry_" + req["clientUserMessageId"]
+        )
         self.assertEqual(ctx, {"inheritThreadSettings": True, "responseItems": []})
         for forbidden in [
             "approvalPolicy",

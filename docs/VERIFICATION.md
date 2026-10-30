@@ -37,11 +37,11 @@ python3 verify.py --thread-id <test-thread-id> --after-turn <active-turn-id> \
 The agent must write a local handoff that tells the resumed turn to read this
 exact receipt first, then end its successful current turn. The helper waits for
 completion, injects overload/active-Goal lifecycle events in an isolated temporary
-mirror, follows detection/backoff, and sends one empty-input continuation to the
+mirror, follows detection/backoff, and sends one fixed-instruction continuation to the
 real same-thread Desktop owner. It never changes actual Goal state or real logs.
 
 On resumption, read the receipt and `.intent.json`; require `same_thread_resumed`,
-one send, distinct real resumed turn, assistant output, equal model/cwd/resolved
+one send, distinct real resumed turn with the exact persisted recovery-origin marker, assistant output, equal model/cwd/resolved
 effort/full permission hash, `delivery_observation.result=new_turn_observed`,
 mirror cleanup and healthy enabled daemon. Independently corroborate the real
 completion/new-start metadata. Confirm the helper exited.
@@ -60,3 +60,12 @@ any new send. Never arm another probe merely because a receipt is missing.
 Synthetic active-Goal metadata does not create an actual backend native Goal.
 This proves the guarded branch and real continuation, not genuine upstream
 capacity recovery or an actual native Goal outage.
+
+## Verifying that work continued
+
+A full acceptance check also prepares a pending action with a random nonce in
+ignored `private/`. The original turn must not complete that action. Only the
+first automatic turn after the original completes may write the result marker;
+its turn ID, recovery origin and full model/workspace/permission context must
+match the receipt. A later manual audit cannot supply the result. Record helper
+exit, mirror cleanup and service health separately from the actual action.

@@ -40,6 +40,11 @@ from codex_retry.lifecycle import (
     goal_allows_retry,
 )
 from codex_retry.ipc import DesktopIPC, safe_socket
+from codex_retry.recovery_input import (
+    USER_REQUEST_TRIGGERS,
+    own_recovery_message,
+    recovery_id_from_trigger,
+)
 
 
 class Engine:
@@ -174,6 +179,16 @@ class Engine:
                     }
             return
         if kind == "user_message":
+            if (
+                old.get("kind") == "task_started"
+                and old.get("active_recovery_turn_id") == old.get("turn_id")
+                and old.get("active_recovery_id")
+                == old.get("last_dispatch", {}).get("recovery_id")
+                and own_recovery_message(
+                    event, old.get("turn_id"), old.get("active_recovery_id")
+                )
+            ):
+                return
             old["cancelled_failure_turn_id"] = old.get("turn_id")
             self.state["jobs"].pop(tid, None)
             old.pop("awaiting_start", None)
@@ -181,15 +196,29 @@ class Engine:
             return
         if kind == "task_started":
             delivery = old.get("awaiting_start")
-            if event.get("turn_trigger") == "composer":
+            old.pop("active_recovery_id", None)
+            old.pop("active_recovery_turn_id", None)
+            if event.get("turn_trigger") in USER_REQUEST_TRIGGERS:
                 old.update(attempts=0, outage_at=0)
                 old.pop("awaiting_start", None)
                 if delivery:
                     old["last_dispatch"]["result"] = "superseded_by_human_request"
             elif delivery and turn != delivery["failed_turn_id"]:
+                identifier = recovery_id_from_trigger(event.get("turn_trigger"))
+                own_start = identifier is not None and identifier == old[
+                    "last_dispatch"
+                ].get("recovery_id")
                 old["last_dispatch"].update(
-                    result="new_turn_observed", resumed_turn_id=turn, observed_at=now
+                    result=(
+                        "new_turn_observed" if own_start else "superseded_by_other_turn"
+                    ),
+                    resumed_turn_id=turn,
+                    observed_at=now,
                 )
+                if own_start:
+                    old.update(
+                        active_recovery_id=identifier, active_recovery_turn_id=turn
+                    )
                 old.pop("awaiting_start", None)
                 old.pop("stopped_reason", None)
             if old.get("cancelled_failure_turn_id") != turn:
@@ -437,6 +466,7 @@ class Engine:
             t.update(attempts=t.get("attempts", 0) + 1, outage_at=job["outage_at"])
             t["last_dispatch"] = {
                 "failed_turn_id": expected,
+                "recovery_id": str(uuid.uuid4()),
                 "at": self.clock(),
                 "result": "intent_persisted",
             }
@@ -448,7 +478,11 @@ class Engine:
             self.state["jobs"].pop(tid, None)
             persist()
             ipc.continue_thread(
-                tid, owner, settings["model"], settings.get("reasoningEffort")
+                tid,
+                owner,
+                settings["model"],
+                settings.get("reasoningEffort"),
+                recovery_id=t["last_dispatch"]["recovery_id"],
             )
             await_start("acknowledged")
             persist()

@@ -22,12 +22,21 @@ do not change the semantic Goal hash. The helper never writes Goal state.
   keep this directory private. No prompts, tool bodies, credentials or raw model
   responses are retained. Receipts can contain machine paths and must stay local.
 - Sends initialization, owner-discovery and settings-read IPC requests, followed
-  only when eligible by an empty-input continuation with inherited thread settings.
+  only when eligible by a fixed continuation instruction with inherited thread settings.
+  This automated message is visible in Codex conversation history; it does not replay
+  the original user prompt. A unique recovery UUID is persisted before dispatch and
+  sent as client message ID and turn-origin marker. Only a matching origin and the
+  exact fixed instruction can be treated as the helper's own initial input.
+  Human input after a failure still cancels, even if it copies the fixed text.
 - Uses the local Unix socket and existing provider routing. No telemetry endpoint,
   credentials access, API keys, shell profile changes or global Codex config writes.
   GitHub is contacted during the explicit source download/update only.
 
 ## Preventing duplicate work
+
+The helper's own initial input does not reset the attempt count or outage deadline.
+A new user request still gets its own retry budget. Observing an unrelated new turn
+is recorded as superseding the request, rather than confirmation of our delivery.
 
 Dispatch intent and failed-turn deduplication are fsynced before sending. If a
 send disconnects, times out or the process dies in the ACK window, its outcome is

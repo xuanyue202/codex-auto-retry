@@ -20,13 +20,13 @@ When a task stops with “Selected model is at capacity,” the helper waits bri
 Ask Codex on the target Mac to install it:
 
 ```text
-Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/INSTALL.md
+Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/INSTALL.md
 ```
 
 Or run the versioned installer in Terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/install.sh | sh
 ```
 
 You can [inspect the script](install.sh) before running it. Installation checks the Desktop connection, installs a user LaunchAgent and verifies its process and heartbeat. It requires no sudo, API key or shell profile changes. Installation does not send a model request.
@@ -37,9 +37,9 @@ You can [inspect the script](install.sh) before running it. Installation checks 
 - Successive failures use 1, 2, 4, 8 and 16 seconds of backoff, with at most five attempts in 15 minutes. Logs are checked once per second; scanning and Desktop requests add latency.
 - New user input, cancellation or a new active turn cancels the pending retry. Active native Goals are eligible; paused or completed Goals are not reactivated and their budgets are not reset.
 - The helper checks live logs across dates and context-compaction files. First installation and re-enabling start at the current end of logs, so old failures are not replayed.
-- Dispatch intent is saved before sending. If acceptance is uncertain, the helper observes for a new turn rather than sending the same continuation again. A start not observed within 30 seconds is recorded as `start_not_observed`.
+- Each retry adds a fixed, short continuation instruction to the conversation. It asks the model to check prior results and avoid repeating completed or uncertain external actions. Dispatch intent is saved before sending. If acceptance is uncertain, the helper observes for a new turn rather than sending the same continuation again. A start not observed within 30 seconds is recorded as `start_not_observed`.
 
-The helper uses the existing Desktop owner, with no model switching, original-prompt replay or CLI resume. [Implementation and safety details](docs/SAFETY.md).
+A unique recovery marker distinguishes its own automated message from new user input, so the instruction does not reset the five-attempt or 15-minute limit. The helper uses the existing Desktop owner, with no model switching, original-prompt replay or CLI resume. [Implementation and safety details](docs/SAFETY.md).
 
 ## Commands
 
@@ -61,7 +61,7 @@ To update, run the installer for the release you want. Updates preserve configur
 
 The helper uses an internal Desktop IPC interface, which can change between app releases. An available conversation in the task API does not necessarily have a Desktop owner. `doctor --thread-id <id>` checks a specific owner without starting a turn.
 
-In controlled tests, one Mac continued the conversation and produced model output. A second Mac started a new turn with the same settings but returned an empty assistant message and did not execute the pending test action. Useful continuation on that machine remains unverified. Version 0.1.1 reports this as `same_thread_started_without_assistant_output`.
+Earlier versions could start a turn with no output because they sent an empty input array. Version 0.1.2 sends an explicit continuation instruction. In a single-variable test on the affected Mac, this change produced model output and completed a guarded pending action. The verifier still reports an empty response as `same_thread_started_without_assistant_output`.
 
 These tests inject error metadata into an isolated mirror and make one real continuation request. They do not establish recovery from an actual provider overload. A new turn or model response also does not establish that the task finished. [Verification procedure](docs/VERIFICATION.md).
 

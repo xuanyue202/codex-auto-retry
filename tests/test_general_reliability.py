@@ -273,7 +273,13 @@ class GeneralReliabilityTests(unittest.TestCase):
     def test_acknowledged_send_is_confirmed_by_real_start_event(self):
         self.failure()
         self.assertEqual(self.e.dispatch(TID, lambda: None, FakeIPC), "acknowledged")
-        self.emit("task_started", turn="resumed", stamp="2026-10-30T03:00:01Z")
+        identifier = self.e.state["threads"][TID]["last_dispatch"]["recovery_id"]
+        self.emit(
+            "task_started",
+            turn="resumed",
+            stamp="2026-10-30T03:00:01Z",
+            turn_attribution={"turn_trigger": "codex_auto_retry_" + identifier},
+        )
         last = self.e.state["threads"][TID]["last_dispatch"]
         self.assertEqual(last.get("result"), "new_turn_observed")
         self.assertEqual(last.get("resumed_turn_id"), "resumed")

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2
+
+- Send a fixed continuation instruction instead of an empty input array, so the
+  resumed model has an explicit request to continue unfinished work.
+- Persist a unique recovery ID before sending and attach it to the turn origin.
+  Matching automated input preserves retry counts and the outage deadline;
+  unrelated input and turns remain cancellation/supersession signals.
+- Match the observed turn origin in the verifier and test the pending action,
+  rather than treating a new turn alone as completed useful work.
+
 ## 0.1.1
 
 - Verification no longer reports an empty assistant final message as successful

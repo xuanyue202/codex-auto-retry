@@ -32,3 +32,13 @@ second Mac using the public instructions.
   authorized Mac Local task to install from the public repository and validate
   migration, fresh service health and a bounded same-thread integration check.
   Record private evidence locally and report any unverified boundary honestly.
+
+## Empty-output repair
+
+The maintainer requested repair of the second Mac's empty automatic continuation
+and complete verification that work resumes. A valid repair must give the model
+an execution request without replaying original prompts, changing inherited
+settings or repeating uncertain external actions. Automated input must preserve
+retry/time limits and cancellation. Acceptance requires the automatic turn to
+execute a guarded pending action with the expected identity; new-turn metadata
+alone is insufficient. Keep real test evidence private.

@@ -19,6 +19,12 @@ SOURCE = Path(__file__).resolve().parent
 DATA = Path.home() / "Library/Application Support/CodexAutoRetryMac"
 import retry_watchdog as w
 from install import source_manifest
+from codex_retry.recovery_input import (
+    USER_REQUEST_TRIGGERS,
+    own_recovery_message,
+    recovery_id_from_trigger,
+    recovery_trigger,
+)
 
 
 def installed_runtime():
@@ -102,15 +108,26 @@ def meaningful_output(payload):
     )
 
 
-def external_input(events):
-    return any(
-        e["kind"] in ("user_message", "turn_aborted")
-        or (
-            e["kind"] == "task_started"
-            and e.get("turn_trigger") in ("composer", "app_tool_send_message")
-        )
-        for e in events
-    )
+def external_input(events, recovery_id=None):
+    automatic_turn = None
+    for event in events:
+        if event["kind"] == "task_started":
+            if event.get("turn_trigger") in USER_REQUEST_TRIGGERS:
+                return True
+            if recovery_id is not None:
+                if recovery_id_from_trigger(event.get("turn_trigger")) != recovery_id:
+                    return True
+                automatic_turn = event["turn_id"]
+        elif event["kind"] == "turn_aborted":
+            return True
+        elif (
+            event["kind"] == "task_complete" and event.get("turn_id") == automatic_turn
+        ):
+            automatic_turn = None
+        elif event["kind"] == "user_message":
+            if not own_recovery_message(event, automatic_turn, recovery_id):
+                return True
+    return False
 
 
 def continuation_result(current, turn):
@@ -404,13 +421,18 @@ def main():
                             raise w.RecoveryError("settings_drift_before_dispatch")
                         return result
 
-                    def continue_thread(self, thread_id, owner_id, model, effort):
+                    def continue_thread(
+                        self, thread_id, owner_id, model, effort, *, recovery_id=None
+                    ):
                         evidence["dispatch_attempts"] += 1
                         record(
-                            "dispatch_attempt_recorded", dispatch_at_unix=time.time()
+                            "dispatch_attempt_recorded",
+                            dispatch_at_unix=time.time(),
+                            recovery_id=recovery_id,
+                            recovery_trigger=recovery_trigger(recovery_id),
                         )
                         return super().continue_thread(
-                            thread_id, owner_id, model, effort
+                            thread_id, owner_id, model, effort, recovery_id=recovery_id
                         )
 
                 def persist():
@@ -439,7 +461,10 @@ def main():
                         for e in current["events"]
                         if event_time(e) > event_time(completed[-1])
                     ]
-                    if external_input(after):
+                    if external_input(
+                        after,
+                        engine.state["threads"][tid]["last_dispatch"]["recovery_id"],
+                    ):
                         record("inconclusive_external_input_after_dispatch")
                         return
                     starts = [

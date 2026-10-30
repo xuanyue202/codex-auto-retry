@@ -10,6 +10,23 @@ TID = "11111111-2222-3333-4444-555555555555"
 
 
 class ProbeTests(unittest.TestCase):
+    def test_only_expected_automated_origin_can_supply_its_own_message(self):
+        identifier = "99999999-2222-3333-4444-555555555555"
+        events = [
+            {
+                "kind": "task_started",
+                "turn_id": "automatic",
+                "turn_trigger": "codex_auto_retry_" + identifier,
+            },
+            {"kind": "user_message", "turn_id": "automatic", "recovery_input": True},
+        ]
+        self.assertFalse(probe.external_input(events, identifier))
+        self.assertTrue(
+            probe.external_input(events, "88888888-2222-3333-4444-555555555555")
+        )
+        events.append({"kind": "user_message", "turn_id": "automatic"})
+        self.assertTrue(probe.external_input(events, identifier))
+
     def test_empty_messages_and_tool_results_do_not_count_as_model_output(self):
         cases = [
             ({"type": "message", "role": "assistant", "content": []}, False),

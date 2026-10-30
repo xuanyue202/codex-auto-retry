@@ -40,6 +40,7 @@ RUNTIME_FILES = (
     "codex_retry/ipc.py",
     "codex_retry/service.py",
     "codex_retry/doctor.py",
+    "codex_retry/recovery_input.py",
 )
 
 

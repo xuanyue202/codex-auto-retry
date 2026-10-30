@@ -5,6 +5,12 @@ import hashlib
 import json
 from pathlib import Path
 from .storage import EVENT_RE, THREAD_RE
+from .recovery_input import (
+    CONTINUATION_TEXT,
+    USER_REQUEST_TRIGGERS,
+    own_recovery_message,
+    recovery_id_from_trigger,
+)
 
 
 def classify_capacity(error):
@@ -64,7 +70,7 @@ def metadata(raw):
     if status is not None and not isinstance(status, str):
         status = "unknown"
     # Deliberately discard text, tool contents, last_agent_message and raw errors.
-    return {
+    result = {
         "kind": kind,
         "turn_id": p.get("turn_id"),
         "timestamp": obj.get("timestamp"),
@@ -79,6 +85,9 @@ def metadata(raw):
             else None
         ),
     }
+    if kind == "user_message" and p.get("message") == CONTINUATION_TEXT:
+        result["recovery_input"] = True
+    return result
 
 
 def read_records(path, offset=0, max_offset=None):
@@ -147,6 +156,10 @@ def fold_lifecycle(events):
                 stopped_during_turn = status != "active"
                 ordinary_request = False
         else:
+            if result.get("kind") == "task_started" and own_recovery_message(
+                e, current_turn, recovery_id_from_trigger(trigger)
+            ):
+                continue
             if e["kind"] == "task_started":
                 if cancelled and e.get("turn_id") in (None, cancelled_turn):
                     continue
@@ -156,7 +169,7 @@ def fold_lifecycle(events):
                 )
                 has_turn, stopped_during_turn = True, False
                 trigger = e.get("turn_trigger")
-                if trigger == "composer":
+                if trigger in USER_REQUEST_TRIGGERS:
                     ordinary_request = status in (
                         "paused",
                         "complete",

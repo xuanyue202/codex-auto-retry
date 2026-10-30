@@ -20,13 +20,13 @@
 在目标 Mac 上，把下面这句话发给 Codex：
 
 ```text
-请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/INSTALL.md 安装 Codex Auto Retry。
+请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/INSTALL.md 安装 Codex Auto Retry。
 ```
 
 也可以在终端运行固定版本的安装器：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/install.sh | sh
 ```
 
 运行前可以先[查看脚本](install.sh)。安装器会检查桌面连接，安装用户 LaunchAgent，并核对进程和心跳。无需 sudo 或 API Key，也不修改 shell 配置。安装过程不会提交模型请求。
@@ -37,9 +37,9 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/
 - 连续失败时，依次等待 1、2、4、8、16 秒，15 分钟内最多尝试 5 次。日志每秒检查一次，扫描和桌面请求还会增加耗时。
 - 用户发来新消息、取消任务，或已有新回合开始时，撤销等待中的重试。仍处于 active 状态的原生 Goal 可以重试；已暂停或完成的 Goal 不会被重新激活，预算也不会重置。
 - 检查范围包括跨天会话，以及上下文压缩后产生的日志文件。首次安装和重新启用从日志当前位置开始，不补跑旧错误。
-- 发送前先保存请求意图。接收结果不确定时，观察是否出现新回合，不重复发送同一个续接请求。30 秒内未观察到新回合，会记录 `start_not_observed`。
+- 每次重试会在原会话加入一条固定的简短续接指令，要求模型先核对已有结果，避免重复已完成或结果不确定的外部操作。发送前先保存请求意图。接收结果不确定时，观察是否出现新回合，不重复发送同一个续接请求。30 秒内未观察到新回合，会记录 `start_not_observed`。
 
-工具通过已有的桌面会话持有者发起续接，不切换模型、不重放原始提示词，也不使用 CLI resume。[实现与保护规则](docs/SAFETY.md)。
+每次恢复都有唯一标记，用于区分自动消息和新的用户输入，避免自动指令重置“五次尝试、十五分钟”的限制。工具通过已有的桌面会话持有者发起续接，不切换模型、不重放原始提示词，也不使用 CLI resume。[实现与保护规则](docs/SAFETY.md)。
 
 ## 命令
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/
 
 工具使用 Codex 桌面的内部 IPC 接口，应用更新后可能需要适配。任务 API 能访问一个会话，并不代表桌面仍持有它。可以用 `doctor --thread-id <id>` 只读检查指定会话的持有者。
 
-受控测试中，一台 Mac 在续接后产生了模型输出；另一台 Mac 虽然按原设置启动了新回合，却返回空消息，也没有执行待续的测试动作，因此尚未证实它能继续完成工作。0.1.1 会将这种情况记录为 `same_thread_started_without_assistant_output`。
+早期版本发送空输入数组，可能启动新回合却得不到输出。0.1.2 改为发送明确的续接指令。在受影响 Mac 上的单变量对照中，这一改动产生了模型输出，并完成了受保护的待续动作。验收程序仍会把空响应记为 `same_thread_started_without_assistant_output`。
 
 这些测试在隔离镜像中注入错误记录，再发出一次真实续接请求，尚未验证真实上游满载后的恢复效果。出现新回合或模型输出，也不能单独证明任务已经完成。[验证方法](docs/VERIFICATION.md)。
 
