@@ -29,7 +29,7 @@ add latency. This does not bypass provider capacity or guarantee recovery.*
 Paste this into **Codex on the Mac where you want it installed**:
 
 ```text
-Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.0/INSTALL.md
+Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/INSTALL.md
 ```
 
 Your agent checks compatibility, installs the user background service and verifies
@@ -39,7 +39,7 @@ model request or replay your failed tasks.
 Prefer Terminal? With [requirements](#requirements) met:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/install.sh | sh
 ```
 
 This runs a version-pinned installer. To inspect before executing, download it or

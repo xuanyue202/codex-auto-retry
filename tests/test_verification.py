@@ -10,6 +10,58 @@ TID = "11111111-2222-3333-4444-555555555555"
 
 
 class ProbeTests(unittest.TestCase):
+    def test_empty_messages_and_tool_results_do_not_count_as_model_output(self):
+        cases = [
+            ({"type": "message", "role": "assistant", "content": []}, False),
+            (
+                {"type": "message", "role": "assistant", "content": [{"text": "  "}]},
+                False,
+            ),
+            (
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"text": "synthetic reply"}],
+                },
+                True,
+            ),
+            (
+                {
+                    "type": "function_call",
+                    "name": "synthetic_tool",
+                    "call_id": "synthetic-call",
+                },
+                True,
+            ),
+            ({"type": "function_call_output", "output": "synthetic result"}, False),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(probe.meaningful_output(payload), expected)
+
+    def test_empty_completed_turn_has_distinct_result_and_modern_input_cancels(self):
+        snapshot = {
+            "assistant_turns": set(),
+            "events": [{"kind": "task_complete", "turn_id": "new", "has_error": False}],
+        }
+        self.assertEqual(
+            probe.continuation_result(snapshot, "new"),
+            "same_thread_started_without_assistant_output",
+        )
+        snapshot["assistant_turns"].add("new")
+        self.assertEqual(
+            probe.continuation_result(snapshot, "new"), "same_thread_resumed"
+        )
+        for trigger in ("composer", "app_tool_send_message"):
+            self.assertTrue(
+                probe.external_input(
+                    [{"kind": "task_started", "turn_trigger": trigger}]
+                )
+            )
+        self.assertFalse(
+            probe.external_input([{"kind": "task_started", "turn_trigger": None}])
+        )
+
     def test_clean_clone_uses_private_shared_lock_across_checkouts(self):
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp) / "private-data"
@@ -109,7 +161,7 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual(actual["latest"]["kind"], "task_started")
             self.assertEqual(len(actual["paths"]), 2)
             self.assertEqual(actual["contexts"]["new"]["cwd"], "/test")
-            self.assertIn("new", actual["assistant_turns"])
+            self.assertNotIn("new", actual["assistant_turns"])
 
 
 if __name__ == "__main__":

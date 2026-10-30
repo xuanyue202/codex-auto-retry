@@ -46,6 +46,13 @@ effort/full permission hash, `delivery_observation.result=new_turn_observed`,
 mirror cleanup and healthy enabled daemon. Independently corroborate the real
 completion/new-start metadata. Confirm the helper exited.
 
+An empty final assistant message does not establish model output. A completed
+new turn with no nonempty assistant text or model tool call records
+`same_thread_started_without_assistant_output`, not `same_thread_resumed`.
+This confirms routing/start only; it does not prove useful work continued. Modern
+composer and app-tool messages arriving after dispatch make the probe inconclusive
+instead of letting an unrelated new request stand in for the continuation.
+
 New human input, cancellation, errors in the original turn, a non-idle real thread
 or changed settings aborts the probe. If delivery is uncertain, reconcile before
 any new send. Never arm another probe merely because a receipt is missing.

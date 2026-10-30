@@ -7,7 +7,6 @@ import argparse
 import datetime as dt
 import fcntl
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -82,6 +81,58 @@ def settings_compatible(before, selected):
     ) in (None, before["effort"])
 
 
+def meaningful_output(payload):
+    """Count model text/tool intent; an empty final message is not output."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("type") == "message" and payload.get("role") == "assistant":
+        content = payload.get("content")
+        return isinstance(content, list) and any(
+            isinstance(item, dict)
+            and isinstance(item.get("text"), str)
+            and bool(item["text"].strip())
+            for item in content
+        )
+    return (
+        payload.get("type") in ("function_call", "custom_tool_call")
+        and isinstance(payload.get("name"), str)
+        and bool(payload["name"])
+        and isinstance(payload.get("call_id"), str)
+        and bool(payload["call_id"])
+    )
+
+
+def external_input(events):
+    return any(
+        e["kind"] in ("user_message", "turn_aborted")
+        or (
+            e["kind"] == "task_started"
+            and e.get("turn_trigger") in ("composer", "app_tool_send_message")
+        )
+        for e in events
+    )
+
+
+def continuation_result(current, turn):
+    if turn in current["assistant_turns"]:
+        return "same_thread_resumed"
+    completed = next(
+        (
+            e
+            for e in current["events"]
+            if e["kind"] == "task_complete" and e["turn_id"] == turn
+        ),
+        None,
+    )
+    if completed:
+        return (
+            "continued_turn_failed"
+            if completed.get("has_error")
+            else "same_thread_started_without_assistant_output"
+        )
+    return None
+
+
 def snapshot(tid):
     """Merge lifecycle metadata across compaction shards of the exact thread."""
     events, contexts, assistant_turns, paths = [], {}, set(), []
@@ -107,9 +158,16 @@ def snapshot(tid):
                 elif (
                     current
                     and re.search(rb'"type"\s*:\s*"response_item"', raw[:180])
-                    and re.search(rb'"role"\s*:\s*"assistant"', raw[:600])
+                    and (
+                        re.search(rb'"role"\s*:\s*"assistant"', raw[:600])
+                        or re.search(
+                            rb'"type"\s*:\s*"(?:function_call|custom_tool_call)"',
+                            raw[:300],
+                        )
+                    )
                 ):
-                    assistant_turns.add(current)
+                    if meaningful_output(json.loads(raw).get("payload")):
+                        assistant_turns.add(current)
     events.sort(key=event_time)
     latest = w.fold_lifecycle(events)
     return {
@@ -381,9 +439,7 @@ def main():
                         for e in current["events"]
                         if event_time(e) > event_time(completed[-1])
                     ]
-                    if any(
-                        e["kind"] in ("user_message", "turn_aborted") for e in after
-                    ):
+                    if external_input(after):
                         record("inconclusive_external_input_after_dispatch")
                         return
                     starts = [
@@ -393,7 +449,8 @@ def main():
                     ]
                     for new_id in starts:
                         context = current["contexts"].get(new_id)
-                        if context and new_id in current["assistant_turns"]:
+                        observed = continuation_result(current, new_id)
+                        if context and observed:
                             same = context == before
                             native_start = next(
                                 e
@@ -404,15 +461,12 @@ def main():
                             engine.event(tid, Path(current["paths"][-1]), native_start)
                             persist()
                             record(
-                                (
-                                    "same_thread_resumed"
-                                    if same
-                                    else "failed_settings_changed"
-                                ),
+                                (observed if same else "failed_settings_changed"),
                                 resumed_turn_id=new_id,
                                 resumed_settings=context,
                                 settings_identical=same,
-                                assistant_message_observed=True,
+                                assistant_message_observed=new_id
+                                in current["assistant_turns"],
                                 new_turn_ids_observed=starts,
                                 real_rollout_paths=current["paths"],
                                 delivery_observation=engine.state["threads"][tid].get(

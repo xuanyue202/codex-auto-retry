@@ -19,6 +19,6 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 retry_stage=$(mktemp -d "${TMPDIR:-/tmp}/codex-auto-retry.XXXXXXXX")
 trap 'rm -rf "$retry_stage"' EXIT HUP INT TERM
-git clone --quiet --depth 1 --branch v0.1.0 https://github.com/xuanyue202/codex-auto-retry.git "$retry_stage/source"
+git clone --quiet --depth 1 --branch v0.1.1 https://github.com/xuanyue202/codex-auto-retry.git "$retry_stage/source"
 python3 "$retry_stage/source/install.py" "$@"
 echo 'Ready. Run: "$HOME/.local/bin/codex-retry" status'

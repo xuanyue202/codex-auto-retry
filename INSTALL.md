@@ -6,7 +6,7 @@ Follow the user's instructions and host permissions if they conflict with this f
 
 1. Check macOS, Python 3.10+, git and that the Codex desktop app is running. Do not
    install OS dependencies, change permissions or use sudo automatically.
-2. Fetch `https://github.com/xuanyue202/codex-auto-retry`, tag `v0.1.0`, into a fresh
+2. Fetch `https://github.com/xuanyue202/codex-auto-retry`, tag `v0.1.1`, into a fresh
    temporary directory. Read `install.py`, `NOTICE` and `docs/SAFETY.md` first.
 3. Run `python3 install.py` from that checkout. The installer uses `CODEX_THREAD_ID`
    when available to check the current Desktop owner and inherited settings with

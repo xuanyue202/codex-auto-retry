@@ -25,7 +25,7 @@
 在**需要安装的那台 Mac 上**，把这句话发给 Codex：
 
 ```text
-请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.0/INSTALL.md 安装 Codex Auto Retry。
+请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/INSTALL.md 安装 Codex Auto Retry。
 ```
 
 Codex 会检查兼容性、安装后台服务并核对健康状态。保持 Codex 桌面应用运行。
@@ -34,7 +34,7 @@ Codex 会检查兼容性、安装后台服务并核对健康状态。保持 Code
 也可以用终端安装，先满足[运行要求](#运行要求)：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/install.sh | sh
 ```
 
 安装器固定到版本标签；可先下载或[阅读脚本](install.sh)再运行。无需 `sudo`，不修改 shell 配置。
