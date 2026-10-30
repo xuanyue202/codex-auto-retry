@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+.coverage
+htmlcov/
+.ruff_cache/
+private/
+evidence/
+*.log
+*.receipt.json
+dist/
