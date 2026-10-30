@@ -63,6 +63,48 @@ class GeneralReliabilityTests(unittest.TestCase):
         )
         self.assertEqual(self.e.state["jobs"][TID]["due"], due)
 
+    def test_cancellation_is_not_undone_by_late_duplicate_failure(self):
+        for cancel in ("user_message", "turn_aborted"):
+            with self.subTest(cancel=cancel):
+                self.path.write_bytes(b"")
+                self.e = w.Engine(self.cfg, clock=lambda: self.clock[0])
+                self.failure()
+                self.emit(cancel, stamp="2026-10-30T03:00:01Z")
+                self.emit(
+                    "task_complete",
+                    stamp="2026-10-30T03:00:02Z",
+                    error={"codex_error_info": "server_overloaded"},
+                )
+                self.assertNotIn(TID, self.e.state["jobs"])
+                self.assertNotEqual(
+                    w.latest_lifecycle(self.path)["kind"], "task_complete"
+                )
+
+    def test_pre_send_cancellation_with_unscanned_duplicate_failure_blocks_dispatch(
+        self,
+    ):
+        self.failure()
+        for kind, stamp in [("user_message", "01"), ("task_complete", "02")]:
+            event = {
+                "type": "event_msg",
+                "timestamp": f"2026-10-30T03:00:{stamp}Z",
+                "payload": {
+                    "type": kind,
+                    "turn_id": TURN,
+                    "error": (
+                        {"codex_error_info": "server_overloaded"}
+                        if kind == "task_complete"
+                        else None
+                    ),
+                },
+            }
+            with self.path.open("a") as stream:
+                stream.write(json.dumps(event) + "\n")
+        self.assertEqual(
+            self.e.dispatch(TID, lambda: None, FakeIPC), "superseded_or_active"
+        )
+        self.assertEqual(FakeIPC.count, 0)
+
     def test_late_old_abort_cannot_cancel_current_failure(self):
         self.failure()
         self.emit("turn_aborted", turn="older-turn", stamp="2026-10-30T02:59:59Z")

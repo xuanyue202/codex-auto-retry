@@ -174,6 +174,7 @@ class Engine:
                     }
             return
         if kind == "user_message":
+            old["cancelled_failure_turn_id"] = old.get("turn_id")
             self.state["jobs"].pop(tid, None)
             old.pop("awaiting_start", None)
             old.update(kind=kind, turn_id=None, attempts=0, outage_at=0)
@@ -199,6 +200,7 @@ class Engine:
         if kind == "turn_aborted":
             if turn is not None and old.get("turn_id") not in (None, turn):
                 return
+            old["cancelled_failure_turn_id"] = turn or old.get("turn_id")
             old.update(kind=kind, turn_id=turn, attempts=0, outage_at=0)
             old.pop("awaiting_start", None)
             self.state["jobs"].pop(tid, None)

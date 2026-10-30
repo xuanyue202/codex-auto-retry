@@ -10,6 +10,17 @@ TID = "11111111-2222-3333-4444-555555555555"
 
 
 class ProbeTests(unittest.TestCase):
+    def test_clean_clone_uses_private_shared_lock_across_checkouts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "private-data"
+            with patch.object(probe, "DATA", data):
+                with probe.acquire_probe_lock():
+                    self.assertTrue((data / "verification.lock").exists())
+                    with self.assertRaises(BlockingIOError):
+                        probe.acquire_probe_lock()
+                with probe.acquire_probe_lock():
+                    pass
+
     def test_unset_effort_selector_is_distinct_from_explicit_effort_change(self):
         before = {"model": "original", "effort": "high"}
         self.assertTrue(

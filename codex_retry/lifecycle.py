@@ -137,6 +137,7 @@ def fold_lifecycle(events):
     status, revision, trigger = None, None, None
     has_turn, stopped_during_turn, ordinary_request = False, False, False
     current_turn = None
+    cancelled, cancelled_turn = False, None
     for e in events:
         if e["kind"] == "thread_goal_updated":
             new_status = goal_status(e)
@@ -147,6 +148,9 @@ def fold_lifecycle(events):
                 ordinary_request = False
         else:
             if e["kind"] == "task_started":
+                if cancelled and e.get("turn_id") in (None, cancelled_turn):
+                    continue
+                cancelled = False
                 continuation = result.get("kind") == "task_complete" and result.get(
                     "capacity"
                 )
@@ -163,12 +167,16 @@ def fold_lifecycle(events):
                     ordinary_request = False
                 current_turn = e.get("turn_id")
             elif e["kind"] in ("task_complete", "turn_aborted"):
+                if e["kind"] == "task_complete" and cancelled:
+                    continue
                 if current_turn is not None and e.get("turn_id") not in (
                     None,
                     current_turn,
                 ):
                     continue
                 current_turn = e.get("turn_id") or current_turn
+            if e["kind"] in ("user_message", "turn_aborted"):
+                cancelled, cancelled_turn = True, current_turn
             result = dict(e)
     effective = status
     if stopped_during_turn:

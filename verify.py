@@ -36,6 +36,17 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def acquire_probe_lock():
+    DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = (DATA / "verification.lock").open("a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock
+    except Exception:
+        lock.close()
+        raise
+
+
 def context_metadata(payload):
     policy = {
         k: v
@@ -163,253 +174,267 @@ def main():
     if not 30 <= args.timeout <= 600 or args.evidence.exists():
         raise SystemExit("invalid timeout or evidence already exists")
     args.evidence.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = (SOURCE / "evidence/capacity-e2e-local.lock").open("a")
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    tid, original = args.thread_id, args.after_turn
-    cfg = w.config(DATA)
-    evidence = {
-        "mode": "synthetic_mirror_not_real_provider_overload",
-        "thread_id": tid,
-        "original_turn_id": original,
-        "dispatch_attempts": 0,
-        "error_code": "server_overloaded",
-        "synthetic_goal_status": args.synthetic_goal_status,
-        "source_sha256": digest(SOURCE / "retry_watchdog.py"),
-        "runtime_sha256": digest(runtime),
-        "started_at_unix": time.time(),
-    }
+    with acquire_probe_lock():
+        tid, original = args.thread_id, args.after_turn
+        cfg = w.config(DATA)
+        evidence = {
+            "mode": "synthetic_mirror_not_real_provider_overload",
+            "thread_id": tid,
+            "original_turn_id": original,
+            "dispatch_attempts": 0,
+            "error_code": "server_overloaded",
+            "synthetic_goal_status": args.synthetic_goal_status,
+            "source_sha256": digest(SOURCE / "retry_watchdog.py"),
+            "runtime_sha256": digest(runtime),
+            "started_at_unix": time.time(),
+        }
 
-    def record(phase, **fields):
-        evidence.update(phase=phase, updated_at_unix=time.time(), **fields)
-        w.atomic_json(args.evidence, evidence)
+        def record(phase, **fields):
+            evidence.update(phase=phase, updated_at_unix=time.time(), **fields)
+            w.atomic_json(args.evidence, evidence)
 
-    start = time.monotonic()
-    baseline = snapshot(tid)
-    before = baseline["contexts"].get(original)
-    health = healthy_daemon(tid)
-    if (
-        not before
-        or baseline["latest"].get("kind") != "task_started"
-        or baseline["latest"].get("turn_id") != original
-        or evidence["source_sha256"] != evidence["runtime_sha256"]
-        or tid in cfg["exclude_thread_ids"]
-        or not all(
-            health[k] for k in ("enabled", "loaded", "health_enabled", "epoch_matches")
-        )
-        or health["heartbeat_age_s"] >= 15
-        or health["pending_this_thread"]
-    ):
-        record("refused_preflight", daemon=health)
-        return
-    record(
-        "waiting_for_original_turn_completion",
-        original_settings=before,
-        original_rollout_paths=baseline["paths"],
-        daemon_before=health,
-        poll_seconds=cfg["poll_seconds"],
-        delays_seconds=cfg["delays_seconds"],
-    )
-
-    def eligible_real():
-        latest = snapshot(tid)["latest"]
-        state = healthy_daemon(tid)
-        return (
-            latest.get("kind") == "task_complete"
-            and latest.get("turn_id") == original
-            and not latest.get("has_error")
-            and latest.get("goal_status") is None
-            and state["enabled"]
-            and state["loaded"]
-            and state["health_enabled"]
-            and state["epoch"] == health["epoch"]
-            and state["epoch_matches"]
-            and state["heartbeat_age_s"] < 15
-            and not state["pending_this_thread"]
-            and digest(runtime) == evidence["runtime_sha256"]
-        )
-
-    while time.monotonic() - start < args.timeout:
-        latest = snapshot(tid)["latest"]
-        if latest.get("turn_id") != original or latest.get("kind") in (
-            "turn_aborted",
-            "user_message",
-        ):
-            record("cancelled_by_new_input_or_interruption")
-            return
-        if latest.get("kind") == "task_complete":
-            if latest.get("has_error"):
-                record(
-                    "real_error_observed_no_injection",
-                    real_capacity=latest.get("capacity"),
-                )
-                return
-            break
-        time.sleep(0.5)
-    else:
-        record("timed_out_waiting_for_original")
-        return
-    if not eligible_real():
-        record("refused_real_thread_not_idle")
-        return
-
-    try:
-        with tempfile.TemporaryDirectory(
-            prefix="capacity-mirror-", dir=args.evidence.parent
-        ) as tmp:
-            mirror_root = Path(tmp)
-            assert not mirror_root.is_relative_to(Path(cfg["sessions_root"]))
-            mirror = (
-                mirror_root
-                / dt.datetime.now(dt.timezone.utc).strftime("%Y/%m/%d")
-                / ("rollout-" + tid + ".jsonl")
+        start = time.monotonic()
+        baseline = snapshot(tid)
+        before = baseline["contexts"].get(original)
+        health = healthy_daemon(tid)
+        if (
+            not before
+            or baseline["latest"].get("kind") != "task_started"
+            or baseline["latest"].get("turn_id") != original
+            or evidence["source_sha256"] != evidence["runtime_sha256"]
+            or tid in cfg["exclude_thread_ids"]
+            or not all(
+                health[k]
+                for k in ("enabled", "loaded", "health_enabled", "epoch_matches")
             )
-            mirror.parent.mkdir(parents=True)
-            mirror.touch()
-            engine = w.Engine(dict(cfg, sessions_root=str(mirror_root)))
-            engine.scan()
-            time.sleep(
-                cfg["poll_seconds"]
-            )  # Native timestamps have millisecond precision.
-            stamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds")
+            or health["heartbeat_age_s"] >= 15
+            or health["pending_this_thread"]
+        ):
+            record("refused_preflight", daemon=health)
+            return
+        record(
+            "waiting_for_original_turn_completion",
+            original_settings=before,
+            original_rollout_paths=baseline["paths"],
+            daemon_before=health,
+            poll_seconds=cfg["poll_seconds"],
+            delays_seconds=cfg["delays_seconds"],
+        )
 
-            def wire(kind, **extra):
-                return (
-                    json.dumps(
-                        {
-                            "timestamp": stamp,
-                            "type": "event_msg",
-                            "payload": {"type": kind, "turn_id": original, **extra},
-                        }
+        def eligible_real():
+            latest = snapshot(tid)["latest"]
+            state = healthy_daemon(tid)
+            return (
+                latest.get("kind") == "task_complete"
+                and latest.get("turn_id") == original
+                and not latest.get("has_error")
+                and latest.get("goal_status") is None
+                and state["enabled"]
+                and state["loaded"]
+                and state["health_enabled"]
+                and state["epoch"] == health["epoch"]
+                and state["epoch_matches"]
+                and state["heartbeat_age_s"] < 15
+                and not state["pending_this_thread"]
+                and digest(runtime) == evidence["runtime_sha256"]
+            )
+
+        while time.monotonic() - start < args.timeout:
+            latest = snapshot(tid)["latest"]
+            if latest.get("turn_id") != original or latest.get("kind") in (
+                "turn_aborted",
+                "user_message",
+            ):
+                record("cancelled_by_new_input_or_interruption")
+                return
+            if latest.get("kind") == "task_complete":
+                if latest.get("has_error"):
+                    record(
+                        "real_error_observed_no_injection",
+                        real_capacity=latest.get("capacity"),
                     )
-                    + "\n"
-                ).encode()
+                    return
+                break
+            time.sleep(0.5)
+        else:
+            record("timed_out_waiting_for_original")
+            return
+        if not eligible_real():
+            record("refused_real_thread_not_idle")
+            return
 
-            with mirror.open("ab") as stream:
-                if args.synthetic_goal_status:
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="capacity-mirror-", dir=args.evidence.parent
+            ) as tmp:
+                mirror_root = Path(tmp)
+                assert not mirror_root.is_relative_to(Path(cfg["sessions_root"]))
+                mirror = (
+                    mirror_root
+                    / dt.datetime.now(dt.timezone.utc).strftime("%Y/%m/%d")
+                    / ("rollout-" + tid + ".jsonl")
+                )
+                mirror.parent.mkdir(parents=True)
+                mirror.touch()
+                engine = w.Engine(dict(cfg, sessions_root=str(mirror_root)))
+                engine.scan()
+                time.sleep(
+                    cfg["poll_seconds"]
+                )  # Native timestamps have millisecond precision.
+                stamp = dt.datetime.now(dt.timezone.utc).isoformat(
+                    timespec="milliseconds"
+                )
+
+                def wire(kind, **extra):
+                    return (
+                        json.dumps(
+                            {
+                                "timestamp": stamp,
+                                "type": "event_msg",
+                                "payload": {"type": kind, "turn_id": original, **extra},
+                            }
+                        )
+                        + "\n"
+                    ).encode()
+
+                with mirror.open("ab") as stream:
+                    if args.synthetic_goal_status:
+                        stream.write(
+                            wire(
+                                "thread_goal_updated",
+                                goal={"status": args.synthetic_goal_status},
+                            )
+                        )
+                    stream.write(wire("task_started"))
                     stream.write(
                         wire(
-                            "thread_goal_updated",
-                            goal={"status": args.synthetic_goal_status},
+                            "task_complete",
+                            error={"codex_error_info": "server_overloaded"},
                         )
                     )
-                stream.write(wire("task_started"))
-                stream.write(
-                    wire(
-                        "task_complete", error={"codex_error_info": "server_overloaded"}
-                    )
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                injected = time.time()
+                time.sleep(cfg["poll_seconds"])
+                engine.scan()
+                job = engine.state["jobs"].get(tid)
+                if not job or job["turn_id"] != original:
+                    record("failed_error_not_queued")
+                    return
+                record(
+                    "queued_from_structured_error",
+                    injected_at_unix=injected,
+                    detected_at_unix=time.time(),
+                    queue_due_unix=job["due"],
+                    queue_delay_s=job["due"] - engine.state["threads"][tid]["updated"],
+                    mirror_outside_production_sessions=True,
+                    concurrent_dispatch_prevention="real_turn_succeeded_no_pending_mirror_invisible_to_daemon",
                 )
-                stream.flush()
-                os.fsync(stream.fileno())
-            injected = time.time()
-            time.sleep(cfg["poll_seconds"])
-            engine.scan()
-            job = engine.state["jobs"].get(tid)
-            if not job or job["turn_id"] != original:
-                record("failed_error_not_queued")
-                return
-            record(
-                "queued_from_structured_error",
-                injected_at_unix=injected,
-                detected_at_unix=time.time(),
-                queue_due_unix=job["due"],
-                queue_delay_s=job["due"] - engine.state["threads"][tid]["updated"],
-                mirror_outside_production_sessions=True,
-                concurrent_dispatch_prevention="real_turn_succeeded_no_pending_mirror_invisible_to_daemon",
-            )
-            while time.time() < job["due"]:
-                time.sleep(min(0.1, max(0, job["due"] - time.time())))
+                while time.time() < job["due"]:
+                    time.sleep(min(0.1, max(0, job["due"] - time.time())))
 
-            class CountingIPC(w.DesktopIPC):
-                def settings(self, thread_id, owner_id):
-                    result = super().settings(thread_id, owner_id)
-                    record(
-                        "owner_and_settings_readable",
-                        owner_found=True,
-                        owner_model=result.get("model"),
-                        owner_effort=result.get("reasoningEffort"),
-                    )
-                    if not settings_compatible(before, result):
-                        raise w.RecoveryError("settings_drift_before_dispatch")
-                    return result
-
-                def continue_thread(self, thread_id, owner_id, model, effort):
-                    evidence["dispatch_attempts"] += 1
-                    record("dispatch_attempt_recorded", dispatch_at_unix=time.time())
-                    return super().continue_thread(thread_id, owner_id, model, effort)
-
-            def persist():
-                w.atomic_json(args.evidence.with_suffix(".intent.json"), engine.state)
-
-            result = engine.dispatch(
-                tid, persist, ipc_factory=CountingIPC, may_dispatch=eligible_real
-            )
-            record("dispatch_" + result, dispatch_result=result)
-            if result != "acknowledged" or evidence["dispatch_attempts"] != 1:
-                return
-            while time.monotonic() - start < args.timeout:
-                current = snapshot(tid)
-                completed = [
-                    e
-                    for e in current["events"]
-                    if e["kind"] == "task_complete" and e["turn_id"] == original
-                ]
-                if not completed:
-                    record("failed_missing_real_completion")
-                    return
-                after = [
-                    e
-                    for e in current["events"]
-                    if event_time(e) > event_time(completed[-1])
-                ]
-                if any(e["kind"] in ("user_message", "turn_aborted") for e in after):
-                    record("inconclusive_external_input_after_dispatch")
-                    return
-                starts = [
-                    e["turn_id"]
-                    for e in after
-                    if e["kind"] == "task_started" and e["turn_id"] != original
-                ]
-                for new_id in starts:
-                    context = current["contexts"].get(new_id)
-                    if context and new_id in current["assistant_turns"]:
-                        same = context == before
-                        native_start = next(
-                            e
-                            for e in after
-                            if e["kind"] == "task_started" and e["turn_id"] == new_id
-                        )
-                        engine.event(tid, Path(current["paths"][-1]), native_start)
-                        persist()
+                class CountingIPC(w.DesktopIPC):
+                    def settings(self, thread_id, owner_id):
+                        result = super().settings(thread_id, owner_id)
                         record(
-                            (
-                                "same_thread_resumed"
-                                if same
-                                else "failed_settings_changed"
-                            ),
-                            resumed_turn_id=new_id,
-                            resumed_settings=context,
-                            settings_identical=same,
-                            assistant_message_observed=True,
-                            new_turn_ids_observed=starts,
-                            real_rollout_paths=current["paths"],
-                            delivery_observation=engine.state["threads"][tid].get(
-                                "last_dispatch"
-                            ),
-                            daemon_after=healthy_daemon(tid),
+                            "owner_and_settings_readable",
+                            owner_found=True,
+                            owner_model=result.get("model"),
+                            owner_effort=result.get("reasoningEffort"),
                         )
+                        if not settings_compatible(before, result):
+                            raise w.RecoveryError("settings_drift_before_dispatch")
+                        return result
+
+                    def continue_thread(self, thread_id, owner_id, model, effort):
+                        evidence["dispatch_attempts"] += 1
+                        record(
+                            "dispatch_attempt_recorded", dispatch_at_unix=time.time()
+                        )
+                        return super().continue_thread(
+                            thread_id, owner_id, model, effort
+                        )
+
+                def persist():
+                    w.atomic_json(
+                        args.evidence.with_suffix(".intent.json"), engine.state
+                    )
+
+                result = engine.dispatch(
+                    tid, persist, ipc_factory=CountingIPC, may_dispatch=eligible_real
+                )
+                record("dispatch_" + result, dispatch_result=result)
+                if result != "acknowledged" or evidence["dispatch_attempts"] != 1:
+                    return
+                while time.monotonic() - start < args.timeout:
+                    current = snapshot(tid)
+                    completed = [
+                        e
+                        for e in current["events"]
+                        if e["kind"] == "task_complete" and e["turn_id"] == original
+                    ]
+                    if not completed:
+                        record("failed_missing_real_completion")
                         return
-                time.sleep(0.5)
-            record("acknowledged_but_new_assistant_turn_not_observed")
-    except Exception as exc:
-        record(
-            "failed_probe", error_type=type(exc).__name__, error_category=str(exc)[:100]
-        )
-        raise
-    finally:
-        evidence["mirror_cleaned"] = (
-            "mirror_root" not in locals() or not mirror_root.exists()
-        )
-        w.atomic_json(args.evidence, evidence)
+                    after = [
+                        e
+                        for e in current["events"]
+                        if event_time(e) > event_time(completed[-1])
+                    ]
+                    if any(
+                        e["kind"] in ("user_message", "turn_aborted") for e in after
+                    ):
+                        record("inconclusive_external_input_after_dispatch")
+                        return
+                    starts = [
+                        e["turn_id"]
+                        for e in after
+                        if e["kind"] == "task_started" and e["turn_id"] != original
+                    ]
+                    for new_id in starts:
+                        context = current["contexts"].get(new_id)
+                        if context and new_id in current["assistant_turns"]:
+                            same = context == before
+                            native_start = next(
+                                e
+                                for e in after
+                                if e["kind"] == "task_started"
+                                and e["turn_id"] == new_id
+                            )
+                            engine.event(tid, Path(current["paths"][-1]), native_start)
+                            persist()
+                            record(
+                                (
+                                    "same_thread_resumed"
+                                    if same
+                                    else "failed_settings_changed"
+                                ),
+                                resumed_turn_id=new_id,
+                                resumed_settings=context,
+                                settings_identical=same,
+                                assistant_message_observed=True,
+                                new_turn_ids_observed=starts,
+                                real_rollout_paths=current["paths"],
+                                delivery_observation=engine.state["threads"][tid].get(
+                                    "last_dispatch"
+                                ),
+                                daemon_after=healthy_daemon(tid),
+                            )
+                            return
+                    time.sleep(0.5)
+                record("acknowledged_but_new_assistant_turn_not_observed")
+        except Exception as exc:
+            record(
+                "failed_probe",
+                error_type=type(exc).__name__,
+                error_category=str(exc)[:100],
+            )
+            raise
+        finally:
+            evidence["mirror_cleaned"] = (
+                "mirror_root" not in locals() or not mirror_root.exists()
+            )
+            w.atomic_json(args.evidence, evidence)
 
 
 if __name__ == "__main__":
