@@ -27,6 +27,24 @@ class ProbeTests(unittest.TestCase):
         events.append({"kind": "user_message", "turn_id": "automatic"})
         self.assertTrue(probe.external_input(events, identifier))
 
+    def test_initial_input_exemption_is_not_renewed_by_duplicate_start(self):
+        identifier = "99999999-2222-3333-4444-555555555555"
+        events = [
+            {
+                "kind": "task_started",
+                "turn_id": "automatic",
+                "turn_trigger": "codex_auto_retry_" + identifier,
+            },
+            {"kind": "user_message", "turn_id": "automatic", "recovery_input": True},
+            {
+                "kind": "task_started",
+                "turn_id": "automatic",
+                "turn_trigger": "codex_auto_retry_" + identifier,
+            },
+            {"kind": "user_message", "turn_id": "automatic", "recovery_input": True},
+        ]
+        self.assertTrue(probe.external_input(events, identifier))
+
     def test_empty_messages_and_tool_results_do_not_count_as_model_output(self):
         cases = [
             ({"type": "message", "role": "assistant", "content": []}, False),

@@ -110,14 +110,27 @@ def meaningful_output(payload):
 
 def external_input(events, recovery_id=None):
     automatic_turn = None
+    matched_turn = None
+    recovery_input_seen = False
+    seen_records = set()
     for event in events:
+        if event.get("timestamp") is not None:
+            key = w.event_key(event)
+            if key in seen_records:
+                continue
+            seen_records.add(key)
         if event["kind"] == "task_started":
             if event.get("turn_trigger") in USER_REQUEST_TRIGGERS:
                 return True
             if recovery_id is not None:
                 if recovery_id_from_trigger(event.get("turn_trigger")) != recovery_id:
                     return True
+                if matched_turn is not None:
+                    if event["turn_id"] == matched_turn:
+                        continue
+                    return True
                 automatic_turn = event["turn_id"]
+                matched_turn = automatic_turn
         elif event["kind"] == "turn_aborted":
             return True
         elif (
@@ -125,8 +138,11 @@ def external_input(events, recovery_id=None):
         ):
             automatic_turn = None
         elif event["kind"] == "user_message":
-            if not own_recovery_message(event, automatic_turn, recovery_id):
+            if recovery_input_seen or not own_recovery_message(
+                event, automatic_turn, recovery_id
+            ):
                 return True
+            recovery_input_seen = True
     return False
 
 

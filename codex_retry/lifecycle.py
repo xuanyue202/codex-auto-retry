@@ -147,7 +147,14 @@ def fold_lifecycle(events):
     has_turn, stopped_during_turn, ordinary_request = False, False, False
     current_turn = None
     cancelled, cancelled_turn = False, None
+    recovery_input_seen = False
+    seen_records = set()
     for e in events:
+        if e.get("timestamp") is not None:
+            key = event_key(e)
+            if key in seen_records:
+                continue
+            seen_records.add(key)
         if e["kind"] == "thread_goal_updated":
             new_status = goal_status(e)
             changed = goal_changed(status, revision, e)
@@ -156,13 +163,26 @@ def fold_lifecycle(events):
                 stopped_during_turn = status != "active"
                 ordinary_request = False
         else:
-            if result.get("kind") == "task_started" and own_recovery_message(
-                e, current_turn, recovery_id_from_trigger(trigger)
+            if (
+                not recovery_input_seen
+                and result.get("kind") == "task_started"
+                and own_recovery_message(
+                    e, current_turn, recovery_id_from_trigger(trigger)
+                )
             ):
+                recovery_input_seen = True
                 continue
             if e["kind"] == "task_started":
                 if cancelled and e.get("turn_id") in (None, cancelled_turn):
                     continue
+                identifier = recovery_id_from_trigger(e.get("turn_trigger"))
+                if (
+                    identifier is not None
+                    and identifier == recovery_id_from_trigger(trigger)
+                    and e.get("turn_id") == current_turn
+                ):
+                    continue
+                recovery_input_seen = False
                 cancelled = False
                 continuation = result.get("kind") == "task_complete" and result.get(
                     "capacity"

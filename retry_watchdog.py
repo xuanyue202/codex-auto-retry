@@ -181,6 +181,7 @@ class Engine:
         if kind == "user_message":
             if (
                 old.get("kind") == "task_started"
+                and not old.get("recovery_input_seen", False)
                 and old.get("active_recovery_turn_id") == old.get("turn_id")
                 and old.get("active_recovery_id")
                 == old.get("last_dispatch", {}).get("recovery_id")
@@ -188,6 +189,7 @@ class Engine:
                     event, old.get("turn_id"), old.get("active_recovery_id")
                 )
             ):
+                old["recovery_input_seen"] = True
                 return
             old["cancelled_failure_turn_id"] = old.get("turn_id")
             self.state["jobs"].pop(tid, None)
@@ -196,15 +198,24 @@ class Engine:
             return
         if kind == "task_started":
             delivery = old.get("awaiting_start")
+            identifier = recovery_id_from_trigger(event.get("turn_trigger"))
+            same_recovery = (
+                identifier is not None
+                and identifier == old.get("active_recovery_id")
+                and identifier == old.get("last_dispatch", {}).get("recovery_id")
+                and turn == old.get("active_recovery_turn_id")
+            )
+            if same_recovery:
+                return
             old.pop("active_recovery_id", None)
             old.pop("active_recovery_turn_id", None)
+            old.pop("recovery_input_seen", None)
             if event.get("turn_trigger") in USER_REQUEST_TRIGGERS:
                 old.update(attempts=0, outage_at=0)
                 old.pop("awaiting_start", None)
                 if delivery:
                     old["last_dispatch"]["result"] = "superseded_by_human_request"
             elif delivery and turn != delivery["failed_turn_id"]:
-                identifier = recovery_id_from_trigger(event.get("turn_trigger"))
                 own_start = identifier is not None and identifier == old[
                     "last_dispatch"
                 ].get("recovery_id")
@@ -217,7 +228,9 @@ class Engine:
                 )
                 if own_start:
                     old.update(
-                        active_recovery_id=identifier, active_recovery_turn_id=turn
+                        active_recovery_id=identifier,
+                        active_recovery_turn_id=turn,
+                        recovery_input_seen=False,
                     )
                 old.pop("awaiting_start", None)
                 old.pop("stopped_reason", None)

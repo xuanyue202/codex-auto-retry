@@ -218,3 +218,71 @@ class RecoveryInputTests(unittest.TestCase):
         self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
         self.assertNotIn(TID, self.engine.state["jobs"])
         self.assertEqual(w.latest_lifecycle(self.path)["kind"], "user_message")
+
+    def test_second_identical_input_cancels_even_after_restart(self):
+        from codex_retry.recovery_input import CONTINUATION_TEXT
+
+        self.dispatch_failure()
+        self.own_start()
+        self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
+        self.engine = w.Engine(
+            self.engine.cfg,
+            json.loads(json.dumps(self.engine.state)),
+            clock=lambda: self.clock[0],
+        )
+        self.emit("user_message", None, message=CONTINUATION_TEXT)
+        self.emit(
+            "task_complete",
+            "automatic",
+            error={"codex_error_info": "server_overloaded"},
+        )
+        self.assertNotIn(TID, self.engine.state["jobs"])
+        self.assertNotEqual(w.latest_lifecycle(self.path)["kind"], "task_complete")
+
+    def test_duplicate_start_preserves_budget_before_initial_input(self):
+        from codex_retry.recovery_input import CONTINUATION_TEXT
+
+        self.dispatch_failure()
+        self.own_start()
+        self.own_start()
+        self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
+        self.assertEqual(self.engine.state["threads"][TID]["attempts"], 1)
+        self.emit(
+            "task_complete",
+            "automatic",
+            error={"codex_error_info": "server_overloaded"},
+        )
+        self.assertIn(TID, self.engine.state["jobs"])
+
+    def test_duplicate_start_does_not_renew_input_exemption(self):
+        from codex_retry.recovery_input import CONTINUATION_TEXT
+
+        self.dispatch_failure()
+        self.own_start()
+        self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
+        self.own_start()
+        self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
+        self.emit(
+            "task_complete",
+            "automatic",
+            error={"codex_error_info": "server_overloaded"},
+        )
+        self.assertNotIn(TID, self.engine.state["jobs"])
+        self.assertNotEqual(w.latest_lifecycle(self.path)["kind"], "task_complete")
+
+    def test_duplicate_copy_of_same_log_record_is_not_new_human_input(self):
+        from codex_retry.recovery_input import CONTINUATION_TEXT
+
+        self.dispatch_failure()
+        self.own_start()
+        self.emit("user_message", "automatic", message=CONTINUATION_TEXT)
+        duplicate = self.path.read_bytes().splitlines(keepends=True)[-1]
+        with self.path.open("ab") as stream:
+            stream.write(duplicate)
+        self.emit(
+            "task_complete",
+            "automatic",
+            error={"codex_error_info": "server_overloaded"},
+        )
+        self.assertEqual(w.latest_lifecycle(self.path)["kind"], "task_complete")
+        self.assertIn(TID, self.engine.state["jobs"])
