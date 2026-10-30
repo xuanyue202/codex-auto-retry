@@ -49,6 +49,10 @@ state and plist, then switches and verifies process/heartbeat. Failure restores
 the previous service without rewinding live state/seen. Unknown state versions or
 invalid configuration fail closed. Existing enable preference and configuration
 bytes remain intact on successful upgrade. First install begins at current EOF.
+Installation and preference/service changes use the same private nonblocking
+lock. Concurrent mutating commands report busy before writing; status and doctor
+remain read-only. A rollback cannot revive a successfully concurrent uninstall
+or overwrite a pause accepted through these controls.
 
 The LaunchAgent runs as the logged-in user and starts on login. No privilege
 escalation. It covers this local Desktop user's eligible conversations across

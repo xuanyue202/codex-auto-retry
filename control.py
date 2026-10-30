@@ -11,7 +11,14 @@ import uuid
 from codex_retry import __version__
 from codex_retry import doctor, service
 from codex_retry.service import status
-from codex_retry.storage import DATA, RecoveryError, atomic_json, config, load_json
+from codex_retry.storage import (
+    DATA,
+    RecoveryError,
+    atomic_json,
+    config,
+    load_json,
+    mutation_lock,
+)
 
 
 def main():
@@ -27,15 +34,35 @@ def main():
     if args.command == "doctor":
         print(json.dumps(doctor.check(cfg, args.thread_id), indent=2))
         return
-    if args.command in ("enable", "disable", "stop", "uninstall"):
-        cfg.update(enabled=args.command == "enable", enabled_epoch=str(uuid.uuid4()))
+    if args.command == "status":
+        print(
+            json.dumps(
+                dict(
+                    status(cfg, load_json(DATA / "state.json", {})), version=__version__
+                ),
+                indent=2,
+            )
+        )
+        return
+    with mutation_lock(DATA):
+        apply_command(args.command)
+
+
+def apply_command(command):
+    cfg = config(DATA)
+    if command in ("stop", "uninstall", "start"):
+        path = service.agent_path()
+        if path.exists() and not service.owned_agent(plistlib.loads(path.read_bytes())):
+            raise RecoveryError("refusing_unrelated_launchagent")
+    if command in ("enable", "disable", "stop", "uninstall"):
+        cfg.update(enabled=command == "enable", enabled_epoch=str(uuid.uuid4()))
         atomic_json(DATA / "config.json", cfg)
-    if args.command in ("stop", "uninstall"):
+    if command in ("stop", "uninstall"):
         path = service.agent_path()
         if path.exists() and not service.owned_agent(plistlib.loads(path.read_bytes())):
             raise RecoveryError("refusing_unrelated_launchagent")
         service.stop_service()
-        if args.command == "uninstall":
+        if command == "uninstall":
             path.unlink(missing_ok=True)
             wrapper = Path.home() / ".local/bin/codex-retry"
             if (
@@ -45,7 +72,7 @@ def main():
                 wrapper.unlink()
             print(json.dumps({"uninstalled": True, "private_data_retained": str(DATA)}))
             return
-    elif args.command == "start":
+    elif command == "start":
         if not service.owned_agent(plistlib.loads(service.agent_path().read_bytes())):
             raise RecoveryError("refusing_unrelated_launchagent")
         if not service.service_info()["loaded"]:

@@ -350,6 +350,8 @@ class Engine:
         now = self.clock()
 
         def limit_reason():
+            if tid in self.cfg["exclude_thread_ids"]:
+                return "excluded_thread"
             if self.clock() - job["outage_at"] >= self.cfg["max_outage_seconds"]:
                 return "outage_timeout"
             if (
@@ -420,7 +422,7 @@ class Engine:
             settings = ipc.settings(tid, owner)
             if settings.get("mode") not in (None, "durable", "default"):
                 raise RecoveryError("unsupported_thread_mode")
-            if not eligible() or not may_dispatch():
+            if not may_dispatch() or not eligible():
                 self.state["jobs"].pop(tid, None)
                 self.state["threads"][tid]["cancelled_failure_turn_id"] = expected
                 persist()
@@ -504,11 +506,18 @@ def daemon(data, once=False):
                     list(engine.state["jobs"].items()), key=lambda item: item[1]["due"]
                 ):
                     if job["due"] <= time.time() and tid in engine.state["jobs"]:
+
+                        def may_dispatch():
+                            engine.cfg = config(data)
+                            return (
+                                engine.cfg["enabled"]
+                                and engine.cfg.get("enabled_epoch") == epoch
+                            )
+
                         engine.dispatch(
                             tid,
                             persist,
-                            may_dispatch=lambda: config(data)["enabled"]
-                            and config(data).get("enabled_epoch") == epoch,
+                            may_dispatch=may_dispatch,
                         )
                         if time.monotonic() - work_started >= 1:
                             break  # Poll/cancel/heartbeat again after one slow IPC lookup.

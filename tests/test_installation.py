@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 import install
+import control
+from codex_retry import storage
 from codex_retry import doctor, service
 from codex_retry.storage import DEFAULT, RecoveryError, atomic_json, load_json
 
@@ -167,6 +169,34 @@ class InstallationTests(unittest.TestCase):
                 install.install("11111111-2222-3333-4444-555555555555")
         self.assertFalse(self.data.exists())
         self.assertFalse(self.agent.exists())
+
+    def test_mutating_control_refuses_install_in_progress_without_changing_preference(
+        self,
+    ):
+        self.legacy()
+        before = (self.data / "config.json").read_bytes()
+        with storage.mutation_lock(self.data), patch.object(
+            control, "DATA", self.data
+        ), patch.object(control.sys, "argv", ["control.py", "disable"]):
+            with self.assertRaisesRegex(RecoveryError, "in_progress"):
+                control.main()
+        self.assertEqual((self.data / "config.json").read_bytes(), before)
+
+    def test_uninstall_during_upgrade_cannot_be_undone_by_installer_rollback(self):
+        self.legacy()
+        original_start = self.start
+
+        def concurrent_uninstall():
+            with patch.object(control, "DATA", self.data), patch.object(
+                control.sys, "argv", ["control.py", "uninstall"]
+            ):
+                with self.assertRaisesRegex(RecoveryError, "in_progress"):
+                    control.main()
+            original_start()
+
+        with patch.object(service, "start_service", side_effect=concurrent_uninstall):
+            receipt = install.install()
+        self.assertTrue(receipt["installed"])
 
 
 class ServiceTests(unittest.TestCase):

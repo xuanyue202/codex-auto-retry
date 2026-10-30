@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import uuid
+from contextlib import contextmanager
+import fcntl
 
 HOME = Path.home()
 DATA = HOME / "Library/Application Support/CodexAutoRetryMac"
@@ -37,6 +39,20 @@ class RecoveryError(Exception):
 
 class AmbiguousDispatch(RecoveryError):
     """The request may have been accepted; never blindly send it twice."""
+
+
+@contextmanager
+def mutation_lock(data):
+    """Serialize installs and user preference/service mutations; reads stay free."""
+    data.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (data / "install.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RecoveryError(
+                "installation_or_control_in_progress_retry_later"
+            ) from exc
+        yield
 
 
 def atomic_json(path, value):

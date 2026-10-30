@@ -264,6 +264,12 @@ class GeneralReliabilityTests(unittest.TestCase):
         self.assertEqual(self.e.dispatch(TID, lambda: None, FakeIPC), "retry_limit")
         self.assertEqual(FakeIPC.count, 0)
 
+    def test_new_exclusion_applies_to_existing_queue(self):
+        self.failure()
+        self.cfg["exclude_thread_ids"] = [TID]
+        self.assertEqual(self.e.dispatch(TID, lambda: None, FakeIPC), "excluded_thread")
+        self.assertEqual(FakeIPC.count, 0)
+
     def test_acknowledged_send_is_confirmed_by_real_start_event(self):
         self.failure()
         self.assertEqual(self.e.dispatch(TID, lambda: None, FakeIPC), "acknowledged")

@@ -17,7 +17,14 @@ import uuid
 import retry_watchdog as watchdog
 from codex_retry import __version__, doctor, service
 from codex_retry.service import healthy_installation
-from codex_retry.storage import DATA, RecoveryError, atomic_json, config, load_json
+from codex_retry.storage import (
+    DATA,
+    RecoveryError,
+    atomic_json,
+    config,
+    load_json,
+    mutation_lock,
+)
 
 SOURCE = Path(__file__).resolve().parent
 RUNTIME_FILES = (
@@ -147,8 +154,7 @@ def install(thread=None):
     was_loaded = service.service_info()["loaded"]
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(DATA, 0o700)
-    with (DATA / "install.lock").open("a") as installation_lock:
-        fcntl.flock(installation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with mutation_lock(DATA):
         if (cfg_path.read_bytes() if cfg_path.exists() else None) != old_cfg or (
             agent.read_bytes() if agent.exists() else None
         ) != old_agent:

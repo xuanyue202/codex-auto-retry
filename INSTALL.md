@@ -40,6 +40,9 @@ LaunchAgent label. The installer requires no pending recovery or uncertain send,
 backs up the old service/config/state, switches to a versioned runtime and checks
 fresh health. It restores the old service on failure without rewinding dispatch
 deduplication state. Never resolve a pending send by deleting state.
+Installation and mutating controls share a lock. A simultaneous install, pause
+or uninstall reports `installation_or_control_in_progress_retry_later`; rerun
+that command after the current operation completes. Read-only status remains available.
 
 Installation health and read-only compatibility are not a full recovery test.
 An optional actual same-thread test needs a human-authorized idle test conversation
