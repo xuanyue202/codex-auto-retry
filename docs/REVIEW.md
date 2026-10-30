@@ -42,3 +42,20 @@ Mac installation/continuation require separate delivery evidence.
 
 This review is evidence for this revision, not a guarantee against future bugs or
 Desktop API changes. Real machine receipts remain private; no session data is published.
+
+## 0.1.1 verification correction
+
+Re-reviewed the whole project through `e7f4f39`, focusing on changes since `b7f2dec`.
+Both axes confirm that empty/whitespace assistant messages and tool results no
+longer count as model output. Completed empty turns have a distinct partial
+result; new composer/app-tool input invalidates a probe. Recovery policy and
+IPC dispatch are unchanged. Versioned installation paths consistently target 0.1.1.
+
+- **Standards:** 3 earlier findings resolved, 0 remaining actionable violations or smells.
+- **Spec:** 4 earlier findings resolved, 0 remaining material findings.
+- **Validation:** 78 tests pass; compilation and diff whitespace checks pass.
+
+The correction followed an actual second-machine observation of a new turn with
+an empty final message. It establishes that the verifier must distinguish routing
+from observed output. Even nonempty output does not by itself prove completed
+useful work or recovery from a genuine upstream outage.
