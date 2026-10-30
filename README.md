@@ -1,132 +1,79 @@
-# Codex Auto Retry · macOS
-
-**Step away. Let Codex pick up where it stopped.**
+# Codex Auto Retry for macOS
 
 [![Tests](https://github.com/xuanyue202/codex-auto-retry/actions/workflows/test.yml/badge.svg)](https://github.com/xuanyue202/codex-auto-retry/actions/workflows/test.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![macOS](https://img.shields.io/badge/platform-macOS-black.svg)](#requirements)
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-You leave Codex working. You return to **“Selected model is at capacity.”**
-The task has been waiting for you to press retry.
+Automatically retries model-capacity failures in the same Codex Desktop conversation, preserving its model, workspace and permissions.
 
-This small background helper watches for that specific failure and asks the
-**same Codex Desktop conversation** to continue. Your model, workspace and
-permissions stay with the conversation. No API key, subscription or Python
-packages to add.
+When a task stops with “Selected model is at capacity,” the helper waits briefly and requests a continuation. It runs as a macOS user background service and uses only the Python standard library.
 
-```text
-Capacity failure → wait 1s → continue in the same conversation
-Fails again?      → wait 2s → 4s → 8s → 16s → stop at the limit
-You type or stop? → pending retry cancelled
-```
+## Requirements
 
-*Behavior illustration. Backoff starts at detection; polling and Desktop routing
-add latency. This does not bypass provider capacity or guarantee recovery.*
+- macOS with a logged-in desktop session, Python 3.10+, git and curl.
+- Codex Desktop running on the same Mac and owning the target conversation. The command-line client alone is not sufficient.
+- Access to local rollout files and the IPC socket, normally under `~/.codex`. First installation respects `CODEX_HOME`.
 
-## Install in one sentence
+## Installation
 
-Paste this into **Codex on the Mac where you want it installed**:
+Ask Codex on the target Mac to install it:
 
 ```text
 Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/INSTALL.md
 ```
 
-Your agent checks compatibility, installs the user background service and verifies
-its health. Keep the Codex desktop app running. Installation does not submit a
-model request or replay your failed tasks.
-
-Prefer Terminal? With [requirements](#requirements) met:
+Or run the versioned installer in Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.1/install.sh | sh
 ```
 
-This runs a version-pinned installer. To inspect before executing, download it or
-[read the source](install.sh). It needs neither `sudo` nor shell profile changes.
+You can [inspect the script](install.sh) before running it. Installation checks the Desktop connection, installs a user LaunchAgent and verifies its process and heartbeat. It requires no sudo, API key or shell profile changes. Installation does not send a model request.
 
-## Why use it?
+## Retry behavior
 
-| When this happens | What the helper does |
-| --- | --- |
-| A long task ends on a structured capacity error | Continues that conversation after a short backoff |
-| The same error repeats | Tries at most five times over 15 minutes |
-| You send another message or cancel | Drops the pending retry |
-| A conversation spans days or compacts into new files | Checks all live lifecycle shards |
-| Desktop accepts a request but its outcome is uncertain | Observes for a new turn; does not blindly send twice |
-| You want it off | One command pauses it; another removes the service |
+- Only structured `server_overloaded` or `serverOverloaded` errors trigger a retry. Authentication, quota, billing, policy and unknown errors are left for the user to resolve.
+- Successive failures use 1, 2, 4, 8 and 16 seconds of backoff, with at most five attempts in 15 minutes. Logs are checked once per second; scanning and Desktop requests add latency.
+- New user input, cancellation or a new active turn cancels the pending retry. Active native Goals are eligible; paused or completed Goals are not reactivated and their budgets are not reset.
+- The helper checks live logs across dates and context-compaction files. First installation and re-enabling start at the current end of logs, so old failures are not replayed.
+- Dispatch intent is saved before sending. If acceptance is uncertain, the helper observes for a new turn rather than sending the same continuation again. A start not observed within 30 seconds is recorded as `start_not_observed`.
 
-Works with ordinary conversations and active native Goals. It never reactivates a
-paused/completed Goal or resets its budget. A new ordinary human request after an
-old Goal is handled separately.
+The helper uses the existing Desktop owner, with no model switching, original-prompt replay or CLI resume. [Implementation and safety details](docs/SAFETY.md).
 
-## Stay in control
+## Commands
 
 ```sh
-"$HOME/.local/bin/codex-retry" status      # enabled, process, heartbeat, pending work
-"$HOME/.local/bin/codex-retry" doctor      # read-only Desktop compatibility check
-"$HOME/.local/bin/codex-retry" disable     # pause; survives app/OS restart
-"$HOME/.local/bin/codex-retry" enable      # watch future failures; no historical replay
+"$HOME/.local/bin/codex-retry" status      # service, heartbeat and pending retries
+"$HOME/.local/bin/codex-retry" doctor      # read-only Desktop connection check
+"$HOME/.local/bin/codex-retry" disable     # pause automatic retries
+"$HOME/.local/bin/codex-retry" enable      # watch future failures
 "$HOME/.local/bin/codex-retry" stop        # pause and unload the service
-"$HOME/.local/bin/codex-retry" start       # load it; preserve enabled/disabled preference
-"$HOME/.local/bin/codex-retry" uninstall   # remove service and launcher; retain private data
+"$HOME/.local/bin/codex-retry" start       # load the service; keep the enable preference
+"$HOME/.local/bin/codex-retry" uninstall   # remove the service and launcher
 ```
 
-If `~/.local/bin` is already on your PATH, `codex-retry status` works too.
+If `~/.local/bin` is on your PATH, you can use `codex-retry` directly. The service starts on login and covers eligible conversations owned by this Mac's Codex Desktop app, across workspaces. A task running on another Mac needs a separate installation there.
 
-The service starts when you log in. It watches eligible conversations owned by
-your local Codex Desktop app, across workspaces. To upgrade, rerun the installer
-for the desired release tag. Existing preferences, cursors and deduplication are
-preserved, including migration from the earlier private macOS version. A pending
-recovery blocks an upgrade until its outcome is reconciled. [Install details](INSTALL.md).
+To update, run the installer for the release you want. Updates preserve configuration, log offsets and dispatch deduplication, including migration from the earlier private macOS build. Pending or uncertain dispatches must be resolved before updating. The installer backs up the existing service and restores it if the new service fails its health check. [Installation details](INSTALL.md).
 
-## Requirements
+## Limitations and test results
 
-- macOS with a logged-in GUI session; Python **3.10+**, git and curl.
-- Codex **desktop app**, running and owning the conversation on that same Mac.
-- Access to its local rollout files and IPC socket (defaults under `~/.codex`;
-  `CODEX_HOME` is supported on first install).
+The helper uses an internal Desktop IPC interface, which can change between app releases. An available conversation in the task API does not necessarily have a Desktop owner. `doctor --thread-id <id>` checks a specific owner without starting a turn.
 
-This is a macOS helper, not a Codex CLI plugin. A task running on another Mac needs
-the helper on **that Mac**. The IPC interface is internal and can change with app
-updates. `doctor --thread-id <id>` checks a particular owner without starting a turn.
+In controlled tests, one Mac continued the conversation and produced model output. A second Mac started a new turn with the same settings but returned an empty assistant message and did not execute the pending test action. Useful continuation on that machine remains unverified. Version 0.1.1 reports this as `same_thread_started_without_assistant_output`.
 
-## Privacy and limits
+These tests inject error metadata into an isolated mirror and make one real continuation request. They do not establish recovery from an actual provider overload. A new turn or model response also does not establish that the task finished. [Verification procedure](docs/VERIFICATION.md).
 
-The helper runs locally and sends no telemetry. It transiently reads lifecycle
-records, discards conversation/tool text, and stores only private IDs, paths,
-timestamps, counters, result categories and Goal revision hashes. No prompts,
-credentials or raw model responses are retained. See [safety and data flow](docs/SAFETY.md).
+The Desktop interface has no atomic check-and-start operation. Cancellation can race with dispatch, and serial IPC lookups can delay other threads. A resumed model still needs to reconcile external actions whose outcomes are uncertain.
 
-- Only exact structured `server_overloaded` / `serverOverloaded` failures trigger
-  recovery. Auth, quota, billing, policy and unknown errors do not.
-- No model switching, prompt replay, CLI resume or global Codex config edits.
-- First install and re-enable start at the current end of logs. Previous failures
-  are not automatically restarted.
-- An IPC acknowledgement is not proof of execution. If no start is observed in
-  30 seconds, status records `start_not_observed`; it does not send again.
-- Owner loss, internal API changes and the final check/start race remain possible.
-  Serial IPC lookups can delay other retries. A resumed model still needs to
-  reconcile any external operation whose result was uncertain.
+## Privacy and local files
 
-## How it works
+The helper sends no telemetry. It reads lifecycle records locally, discards conversation and tool text, and retains IDs, paths, timestamps, counters, result categories and Goal revision hashes. It does not retain prompts, credentials or raw model responses.
 
-```text
-Local rollout lifecycle → exact capacity classifier → bounded retry queue
-                                      ↓
-                          recheck current thread + Goal
-                                      ↓
-                      persist intent → Desktop owner IPC
-                                      ↓
-                           observe new turn or report unknown
-```
+Runtime versions, configuration, state and receipts are stored in `~/Library/Application Support/CodexAutoRetryMac/`. The user LaunchAgent is `com.local.codex-capacity-retry`. Uninstall removes the service and launcher but retains local data for inspection. It does not delete Codex history or change global Codex settings.
 
-Runtime is Python standard library only. Versioned files, config, state and local
-receipts live in `~/Library/Application Support/CodexAutoRetryMac/`; the single
-user LaunchAgent is `com.local.codex-capacity-retry`. Uninstall retains this data
-so you can inspect it; remove it yourself if you no longer need it.
-
-## Verify or contribute
+## Development
 
 ```sh
 git clone https://github.com/xuanyue202/codex-auto-retry.git
@@ -134,14 +81,8 @@ cd codex-auto-retry
 python3 -m unittest discover -s tests -v
 ```
 
-CI uses synthetic logs and fake sockets; it does not make model calls. Optional
-[same-thread integration testing](docs/VERIFICATION.md) uses isolated error
-metadata and one real continuation. That is distinct from observing an actual
-provider outage recover. [Contributing](CONTRIBUTING.md) · [Report a bug](https://github.com/xuanyue202/codex-auto-retry/issues/new/choose).
+CI uses synthetic logs and fake sockets without model calls. See [Contributing](CONTRIBUTING.md), [release review](docs/REVIEW.md) and the [issue tracker](https://github.com/xuanyue202/codex-auto-retry/issues).
 
-## Credits
+## License and attribution
 
-Adapted from the recovery architecture and Desktop IPC framing in
-[sybxxx/codex-auto-retry](https://github.com/sybxxx/codex-auto-retry), with macOS
-service management and additional lifecycle/recovery guards. [MIT](LICENSE);
-[upstream notice](LICENSE.upstream). Independent project, not affiliated with OpenAI.
+MIT licensed. Recovery architecture and Desktop IPC framing are adapted from [sybxxx/codex-auto-retry](https://github.com/sybxxx/codex-auto-retry); its copyright notice is retained in [LICENSE.upstream](LICENSE.upstream). This project is independent of OpenAI.
