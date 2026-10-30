@@ -24,15 +24,37 @@ python3 verify.py --inspect
 ```
 
 If `CODEX_THREAD_ID` is not supplied by the host, pass `--thread-id <test-thread-id>`.
-Take the current `task_started` turn ID, then launch a background helper with
-stdout/stderr redirected into ignored `private/`:
+Take the current `task_started` turn ID, then launch a detached helper with
+stdout/stderr redirected into ignored `private/`. A plain shell background job
+can exit when the agent's terminal command ends. Start a separate session and
+check that the process survives a subsequent tool call before ending the turn:
 
 ```sh
-mkdir -p private
-python3 verify.py --thread-id <test-thread-id> --after-turn <active-turn-id> \
-  --evidence private/integration.receipt.json --synthetic-goal-status active \
-  > private/integration.log 2>&1 &
+python3 - <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+Path('private').mkdir(exist_ok=True)
+with Path('private/integration.log').open('ab') as log:
+    process = subprocess.Popen(
+        [sys.executable, str(Path('verify.py').resolve()),
+         '--thread-id', '<test-thread-id>', '--after-turn', '<active-turn-id>',
+         '--evidence', str(Path('private/integration.receipt.json').resolve()),
+         '--synthetic-goal-status', 'active', '--timeout', '600'],
+        stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+Path('private/integration.pid').write_text(str(process.pid))
+print(process.pid)
+PY
 ```
+
+Replace both placeholders with the exact authorized IDs. In a separate tool
+call, check that PID's command and the receipt's waiting phase with zero sends.
+If the helper has exited, preserve its receipt and reconcile any dispatch before
+preparing another probe. A new manual request cannot substitute for the pending
+automatic turn. Use a fresh receipt and challenge for a replacement window.
 
 The agent must write a local handoff that tells the resumed turn to read this
 exact receipt first, then end its successful current turn. The helper waits for
