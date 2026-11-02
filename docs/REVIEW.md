@@ -90,3 +90,33 @@ Validation: 95 synthetic tests, compilation and diff whitespace checks pass.
 The reviewers did not operate real services. Installed-release acceptance must
 separately show the automatic turn performing a guarded pending action; the
 earlier successful input-only experiment does not replace that evidence.
+
+## 0.1.3 unattended-owner repair
+
+Both axes reviewed the complete project through `7473b8d`, focusing on changes
+since `7f33b56` and issue #2. Validation used 121 synthetic tests and clean diff
+checks; the reviewers did not operate real services or conversations.
+
+### Standards
+
+Activation intent precedes native navigation and survives restart. Loading does
+not consume provider attempts or extend the existing deadline. The installed
+daemon validates explicit inbox requests and preserves duplicate/uncertain-send
+guards. Documentation discloses possible window switching and the opt-out.
+
+**Standards: 0 remaining actionable findings.**
+
+### Spec
+
+One finding was resolved: explicit retry could revive a retained failure after
+a semantic Goal edit. Lifecycle folding now preserves a post-terminal Goal
+change until a distinct new turn. Queuing, explicit requests and dispatch reject
+that failure, including edit/delete/restore and duplicate terminal records.
+
+**Spec: 1 resolved, 0 remaining material findings.**
+
+Full installed acceptance remains separate. It must start with a genuinely
+unavailable owner, let the daemon load the retained original conversation, then
+observe one identified continuation, inherited context, actual work and the final
+turn outcome under the original business deadline. An already-opened conversation
+or a successful URL activation alone does not satisfy that acceptance.
