@@ -25,6 +25,7 @@ DEFAULT = {
     "max_outage_seconds": 900,
     "retention_days": 7,
     "recover_active_goals": True,
+    "recover_missing_owners": True,
     "start_confirmation_seconds": 30,
     "socket_path": str(CODEX / "ipc/ipc.sock"),
     "sessions_root": str(CODEX / "sessions"),
@@ -105,6 +106,8 @@ def config(data):
         raise RecoveryError("invalid_poll_interval")
     if not isinstance(cfg["recover_active_goals"], bool):
         raise RecoveryError("invalid_goal_recovery_setting")
+    if not isinstance(cfg["recover_missing_owners"], bool):
+        raise RecoveryError("invalid_owner_recovery_setting")
     if not number(cfg["start_confirmation_seconds"], 1, 300):
         raise RecoveryError("invalid_start_confirmation_seconds")
     if not number(cfg["retention_days"], 1, 3650, True):

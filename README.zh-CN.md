@@ -12,7 +12,7 @@
 ## 运行要求
 
 - macOS 已登录桌面，安装了 Python 3.10+、git 和 curl。
-- 同一台 Mac 上的 Codex 桌面应用正在运行，并持有目标会话。仅运行命令行客户端不够。
+- 同一台 Mac 上的 Codex 桌面应用正在运行。未打开的会话可通过应用注册的原会话链接加载。仅运行命令行客户端不够。
 - 能读取本机的生命周期日志和 IPC socket，默认位于 `~/.codex`。首次安装支持 `CODEX_HOME`。
 
 ## 安装
@@ -20,13 +20,13 @@
 在目标 Mac 上，把下面这句话发给 Codex：
 
 ```text
-请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/INSTALL.md 安装 Codex Auto Retry。
+请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/INSTALL.md 安装 Codex Auto Retry。
 ```
 
 也可以在终端运行固定版本的安装器：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/install.sh | sh
 ```
 
 运行前可以先[查看脚本](install.sh)。安装器会检查桌面连接，安装用户 LaunchAgent，并核对进程和心跳。无需 sudo 或 API Key，也不修改 shell 配置。安装过程不会提交模型请求。
@@ -37,9 +37,10 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/
 - 连续失败时，依次等待 1、2、4、8、16 秒，15 分钟内最多尝试 5 次。日志每秒检查一次，扫描和桌面请求还会增加耗时。
 - 用户发来新消息、取消任务，或已有新回合开始时，撤销等待中的重试。仍处于 active 状态的原生 Goal 可以重试；已暂停或完成的 Goal 不会被重新激活，预算也不会重置。
 - 检查范围包括跨天会话，以及上下文压缩后产生的日志文件。首次安装和重新启用从日志当前位置开始，不补跑旧错误。
+- 目标没有可用的桌面持有者时，工具会打开一次原会话的本机链接，再重新查询持有者。这可能让 Codex 窗口切到目标会话；在私有配置中设置 `recover_missing_owners: false` 可关闭这一步。
 - 每次重试会在原会话加入一条固定的简短续接指令，要求模型先核对已有结果，避免重复已完成或结果不确定的外部操作。发送前先保存请求意图。接收结果不确定时，观察是否出现新回合，不重复发送同一个续接请求。30 秒内未观察到新回合，会记录 `start_not_observed`。
 
-每次恢复都有唯一标记，用于区分自动消息和新的用户输入，避免自动指令重置“五次尝试、十五分钟”的限制。工具通过已有的桌面会话持有者发起续接，不切换模型、不重放原始提示词，也不使用 CLI resume。[实现与保护规则](docs/SAFETY.md)。
+每次恢复都有唯一标记，用于区分自动消息和新的用户输入，避免自动指令重置“五次尝试、十五分钟”的限制。工具在必要时先加载目标，再通过桌面会话持有者发起续接，不切换模型、不重放原始提示词，也不使用 CLI resume。[实现与保护规则](docs/SAFETY.md)。
 
 ## 命令
 
@@ -57,6 +58,14 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/
 
 更新时，运行目标版本的安装器。已有配置、日志读取位置和发送去重记录都会保留，也支持从早期私人版迁移。存在待发送或结果不明的请求时，需要先核对结果再更新。安装器会备份原服务；新版健康检查失败时，会恢复原服务。[安装细节](INSTALL.md)。
 
+某次满载失败在发送前就已超时，需要明确要求再试一次时，可以让已安装的守护进程处理指定回合：
+
+```sh
+"$HOME/.local/bin/codex-retry" retry --thread-id <thread-id> --turn-id <failed-turn-id>
+```
+
+命令返回请求 ID，不代表已经执行。守护进程会核对原会话当前仍是这次满载失败，并在私有 `requests/` 目录记录接收结果。已经发送、结果未知、有新输入、Goal 已停止或重复提交的请求都会被拒绝。这是用户明确发起的一次有界恢复窗口，不延长业务任务自身的截止时间；仍须核对后续发送和实际工作结果。
+
 ## 限制与测试结果
 
 工具使用 Codex 桌面的内部 IPC 接口，应用更新后可能需要适配。任务 API 能访问一个会话，并不代表桌面仍持有它。可以用 `doctor --thread-id <id>` 只读检查指定会话的持有者。
@@ -64,6 +73,8 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/
 早期版本发送空输入数组，可能启动新回合却得不到输出。0.1.2 改为发送明确的续接指令。在受影响 Mac 上的单变量对照中，这一改动产生了模型输出，并完成了受保护的待续动作。验收程序仍会把空响应记为 `same_thread_started_without_assistant_output`。
 
 这些测试在隔离镜像中注入错误记录，再发出一次真实续接请求，尚未验证真实上游满载后的恢复效果。出现新回合或模型输出，也不能单独证明任务已经完成。[验证方法](docs/VERIFICATION.md)。
+
+查询持有者本身不会加载无人值守任务。0.1.3 补上了有界加载步骤；安装后的无人值守验收必须从查询不到 owner 开始，不能先把会话打开。
 
 桌面接口不支持原子化的“检查状态并启动回合”，因此取消操作与发送之间仍可能发生竞态。串行 IPC 查询可能推迟其他会话的重试。恢复后的模型仍需核对结果不确定的外部操作。
 

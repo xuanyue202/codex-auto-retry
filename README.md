@@ -12,7 +12,7 @@ When a task stops with “Selected model is at capacity,” the helper waits bri
 ## Requirements
 
 - macOS with a logged-in desktop session, Python 3.10+, git and curl.
-- Codex Desktop running on the same Mac and owning the target conversation. The command-line client alone is not sufficient.
+- Codex Desktop running on the same Mac. An unopened conversation can be loaded through its registered thread link. The command-line client alone is not sufficient.
 - Access to local rollout files and the IPC socket, normally under `~/.codex`. First installation respects `CODEX_HOME`.
 
 ## Installation
@@ -20,13 +20,13 @@ When a task stops with “Selected model is at capacity,” the helper waits bri
 Ask Codex on the target Mac to install it:
 
 ```text
-Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/INSTALL.md
+Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/INSTALL.md
 ```
 
 Or run the versioned installer in Terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.2/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/install.sh | sh
 ```
 
 You can [inspect the script](install.sh) before running it. Installation checks the Desktop connection, installs a user LaunchAgent and verifies its process and heartbeat. It requires no sudo, API key or shell profile changes. Installation does not send a model request.
@@ -37,9 +37,10 @@ You can [inspect the script](install.sh) before running it. Installation checks 
 - Successive failures use 1, 2, 4, 8 and 16 seconds of backoff, with at most five attempts in 15 minutes. Logs are checked once per second; scanning and Desktop requests add latency.
 - New user input, cancellation or a new active turn cancels the pending retry. Active native Goals are eligible; paused or completed Goals are not reactivated and their budgets are not reset.
 - The helper checks live logs across dates and context-compaction files. First installation and re-enabling start at the current end of logs, so old failures are not replayed.
+- If the target has no reachable Desktop owner, the helper opens its existing local thread link once, then queries the owner again. This may switch the Codex window to that conversation. Set `recover_missing_owners` to `false` in the private configuration to opt out.
 - Each retry adds a fixed, short continuation instruction to the conversation. It asks the model to check prior results and avoid repeating completed or uncertain external actions. Dispatch intent is saved before sending. If acceptance is uncertain, the helper observes for a new turn rather than sending the same continuation again. A start not observed within 30 seconds is recorded as `start_not_observed`.
 
-A unique recovery marker distinguishes its own automated message from new user input, so the instruction does not reset the five-attempt or 15-minute limit. The helper uses the existing Desktop owner, with no model switching, original-prompt replay or CLI resume. [Implementation and safety details](docs/SAFETY.md).
+A unique recovery marker distinguishes its own automated message from new user input, so the instruction does not reset the five-attempt or 15-minute limit. After loading the target when needed, the helper uses the Desktop owner, with no model switching, original-prompt replay or CLI resume. [Implementation and safety details](docs/SAFETY.md).
 
 ## Commands
 
@@ -57,6 +58,14 @@ If `~/.local/bin` is on your PATH, you can use `codex-retry` directly. The servi
 
 To update, run the installer for the release you want. Updates preserve configuration, log offsets and dispatch deduplication, including migration from the earlier private macOS build. Pending or uncertain dispatches must be resolved before updating. The installer backs up the existing service and restores it if the new service fails its health check. [Installation details](INSTALL.md).
 
+For a specific capacity failure that timed out before any request was sent, an explicit user request can ask the installed daemon to retry it once:
+
+```sh
+"$HOME/.local/bin/codex-retry" retry --thread-id <thread-id> --turn-id <failed-turn-id>
+```
+
+The command returns a request ID, not an execution result. The daemon validates the exact current failure and records acceptance under its private `requests/` directory. It rejects already-sent or uncertain requests, new input, stopped Goals and duplicate manual requests. This explicitly starts a new bounded recovery window for an unsent failure; it does not extend the task's business deadline. Check the subsequent dispatch and actual work before calling it recovered.
+
 ## Limitations and test results
 
 The helper uses an internal Desktop IPC interface, which can change between app releases. An available conversation in the task API does not necessarily have a Desktop owner. `doctor --thread-id <id>` checks a specific owner without starting a turn.
@@ -64,6 +73,8 @@ The helper uses an internal Desktop IPC interface, which can change between app 
 Earlier versions could start a turn with no output because they sent an empty input array. Version 0.1.2 sends an explicit continuation instruction. In a single-variable test on the affected Mac, this change produced model output and completed a guarded pending action. The verifier still reports an empty response as `same_thread_started_without_assistant_output`.
 
 These tests inject error metadata into an isolated mirror and make one real continuation request. They do not establish recovery from an actual provider overload. A new turn or model response also does not establish that the task finished. [Verification procedure](docs/VERIFICATION.md).
+
+Owner discovery alone cannot load an unattended thread. Version 0.1.3 adds a bounded load step; installed unattended acceptance must begin with a failed owner lookup, not a conversation opened in advance.
 
 The Desktop interface has no atomic check-and-start operation. Cancellation can race with dispatch, and serial IPC lookups can delay other threads. A resumed model still needs to reconcile external actions whose outcomes are uncertain.
 

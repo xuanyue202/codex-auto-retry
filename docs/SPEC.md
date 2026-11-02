@@ -42,3 +42,25 @@ settings or repeating uncertain external actions. Automated input must preserve
 retry/time limits and cancellation. Acceptance requires the automatic turn to
 execute a guarded pending action with the expected identity; new-turn metadata
 alone is insufficient. Keep real test evidence private.
+
+## Unattended owner recovery
+
+The maintainer reported a real scheduled capacity failure that was detected and
+queued but could not discover a Desktop owner. Repair the missing-owner path,
+then verify using the installed service on the affected Mac and the retained
+original conversation. Owner lookup alone does not load a thread. Use the
+application's registered local thread link to load it once, persist the intent,
+then recheck lifecycle, preferences, Goal and limits before the same-thread send.
+Expose the possible window switch and an explicit opt-out.
+
+The maintainer explicitly requested triggering the retained failure again. An
+explicit, exact-thread/exact-turn request may queue a bounded retry of an unsent
+current capacity failure after its automatic window expired. The installed daemon
+validates it. It must not replay a sent/uncertain request, reset prior attempt
+limits, extend the original business deadline, or let duplicate commands keep a
+window alive. Automatic startup and upgrades still do not replay old failures.
+
+Acceptance must prove missing owner before recovery, automatic owner loading,
+then one identified same-thread continuation with inherited settings and actual
+work. A loaded conversation, URL-handler success, IPC ACK or a newly observed turn
+alone is insufficient. Time-sensitive work must retain its original time guards.

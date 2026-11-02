@@ -40,6 +40,8 @@ from codex_retry.lifecycle import (
     goal_allows_retry,
 )
 from codex_retry.ipc import DesktopIPC, safe_socket
+from codex_retry.owner_recovery import activate_desktop_thread, OWNER_UNAVAILABLE_ERRORS
+from codex_retry.manual_retry import process_requests
 from codex_retry.recovery_input import (
     USER_REQUEST_TRIGGERS,
     own_recovery_message,
@@ -309,6 +311,74 @@ class Engine:
             "goal_status": old.get("goal_status"),
         }
 
+    def request_retry(self, request):
+        """Accept one explicit request for an unsent failure; automatic history stays inert."""
+        tid, turn = request.get("thread_id"), request.get("turn_id")
+        if any(
+            not isinstance(value, str) or not THREAD_RE.fullmatch(value)
+            for value in (tid, turn)
+        ):
+            return "invalid_thread_or_turn_id"
+        now = self.clock()
+        issued = request.get("requested_at")
+        if (
+            not isinstance(issued, (int, float))
+            or isinstance(issued, bool)
+            or not 0 <= now - issued <= 60
+        ):
+            return "request_expired_or_invalid"
+        if not self.cfg["enabled"] or request.get("enabled_epoch") != self.cfg.get(
+            "enabled_epoch"
+        ):
+            return "disabled_or_epoch_changed"
+        old = self.state["threads"].get(tid)
+        if not old or not old.get("path"):
+            return "thread_not_monitored"
+        previous = old.get("manual_retry", {})
+        if previous.get("request_id") == request["request_id"]:
+            return previous["result"]
+        if previous.get("failed_turn_id") == turn:
+            return "manual_retry_already_requested"
+        if tid in self.cfg["exclude_thread_ids"]:
+            return "excluded_thread"
+        if tid in self.state["jobs"]:
+            return "already_pending"
+        if tid + ":" + turn in self.state["seen"] or old.get("awaiting_start"):
+            return "already_dispatched_or_uncertain"
+        if old.get("attempts", 0) >= self.cfg["max_attempts"]:
+            return "retry_limit"
+        latest = latest_thread_lifecycle(self.cfg["sessions_root"], tid, old["path"])
+        if (
+            latest.get("kind") != "task_complete"
+            or latest.get("turn_id") != turn
+            or not latest.get("capacity")
+        ):
+            return "not_current_capacity_failure"
+        if not goal_allows_retry(self.cfg, latest.get("retry_goal_status")):
+            return "goal_not_retryable"
+        old["manual_retry"] = {
+            "request_id": request["request_id"],
+            "failed_turn_id": turn,
+            "requested_at": issued,
+            "accepted_at": now,
+            "result": "accepted",
+        }
+        old.pop("stopped_reason", None)
+        self.state["jobs"][tid] = {
+            "thread_id": tid,
+            "turn_id": turn,
+            "path": old["path"],
+            "due": now + self.cfg["delays_seconds"][0],
+            "outage_at": now,
+            "goal_revision": latest.get("goal_revision"),
+        }
+        old["last_recovery_decision"] = {
+            "at": now,
+            "turn_id": turn,
+            "reason": "explicit_retry_queued",
+        }
+        return "accepted"
+
     def scan(self):
         root = Path(self.cfg["sessions_root"])
         first_scan = "monitor_started_at" not in self.state
@@ -456,19 +526,65 @@ class Engine:
                 + self.cfg.get("start_confirmation_seconds", 30),
             }
 
+        def cancel():
+            self.state["jobs"].pop(tid, None)
+            self.state["threads"][tid]["cancelled_failure_turn_id"] = expected
+            persist()
+            return "superseded_or_active"
+
         try:
             stage("discover_owner")
             ipc = ipc_factory(self.cfg["socket_path"])
-            owner = ipc.owner(tid)
+            try:
+                owner = ipc.owner(tid)
+            except RecoveryError as exc:
+                if (
+                    not self.cfg["recover_missing_owners"]
+                    or str(exc) not in OWNER_UNAVAILABLE_ERRORS
+                ):
+                    raise
+                if not may_dispatch() or not eligible():
+                    return cancel()
+                if not self.cfg["recover_missing_owners"]:
+                    raise
+                reason = limit_reason()
+                if reason:
+                    return stop(reason)
+                thread = self.state["threads"][tid]
+                prior = thread.get("owner_activation", {})
+                if prior.get("failed_turn_id") == expected:
+                    raise
+                # A URL navigation is separate from a model request. Claim it
+                # durably before launching; never reopen on restart/timeout.
+                thread["owner_activation"] = {
+                    "failed_turn_id": expected,
+                    "at": self.clock(),
+                    "result": "intent_persisted",
+                    "attempts": 1,
+                }
+                stage("activate_owner")
+                try:
+                    activate_desktop_thread(tid)
+                except (OSError, RecoveryError):
+                    thread["owner_activation"]["result"] = "activation_failed"
+                    raise
+                thread["owner_activation"]["result"] = "requested"
+                job["due"] = self.clock() + self.cfg["poll_seconds"]
+                thread["last_recovery_decision"] = {
+                    "at": self.clock(),
+                    "turn_id": expected,
+                    "reason": "owner_activation_requested",
+                }
+                return "owner_activation_requested"
+            activation = self.state["threads"][tid].get("owner_activation", {})
+            if activation.get("failed_turn_id") == expected:
+                activation.update(result="owner_observed", observed_at=self.clock())
             stage("read_settings")
             settings = ipc.settings(tid, owner)
             if settings.get("mode") not in (None, "durable", "default"):
                 raise RecoveryError("unsupported_thread_mode")
             if not may_dispatch() or not eligible():
-                self.state["jobs"].pop(tid, None)
-                self.state["threads"][tid]["cancelled_failure_turn_id"] = expected
-                persist()
-                return "superseded_or_active"
+                return cancel()
             reason = limit_reason()
             if reason:
                 return stop(reason)
@@ -548,6 +664,7 @@ def daemon(data, once=False):
             if engine.cfg["enabled"]:
                 engine.scan()
                 persist()
+                process_requests(data, engine, persist)
                 work_started = time.monotonic()
                 for tid, job in sorted(
                     list(engine.state["jobs"].items()), key=lambda item: item[1]["due"]

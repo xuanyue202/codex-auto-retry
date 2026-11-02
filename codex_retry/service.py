@@ -98,9 +98,14 @@ def status(cfg, state, now=None):
             tid: {
                 "dispatch": thread.get("last_dispatch"),
                 "decision": thread.get("last_recovery_decision"),
+                "owner_activation": thread.get("owner_activation"),
+                "manual_retry": thread.get("manual_retry"),
                 "stopped_reason": thread.get("stopped_reason"),
             }
             for tid, thread in threads.items()
-            if thread.get("last_dispatch") or thread.get("stopped_reason")
+            if thread.get("last_dispatch")
+            or thread.get("stopped_reason")
+            or thread.get("owner_activation")
+            or thread.get("manual_retry")
         },
     }

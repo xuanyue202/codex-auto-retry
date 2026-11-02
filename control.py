@@ -11,6 +11,7 @@ import uuid
 from codex_retry import __version__
 from codex_retry import doctor, service
 from codex_retry.service import status
+from codex_retry.manual_retry import submit_retry
 from codex_retry.storage import (
     DATA,
     RecoveryError,
@@ -26,9 +27,19 @@ def main():
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
         "command",
-        choices=["status", "doctor", "enable", "disable", "stop", "start", "uninstall"],
+        choices=[
+            "status",
+            "doctor",
+            "enable",
+            "disable",
+            "stop",
+            "start",
+            "uninstall",
+            "retry",
+        ],
     )
     parser.add_argument("--thread-id", default=os.environ.get("CODEX_THREAD_ID"))
+    parser.add_argument("--turn-id")
     args = parser.parse_args()
     cfg = config(DATA)
     if args.command == "doctor":
@@ -45,6 +56,16 @@ def main():
         )
         return
     with mutation_lock(DATA):
+        if args.command == "retry":
+            health = status(cfg, load_json(DATA / "state.json", {}))
+            if not all(
+                health[k] for k in ("loaded", "daemon_alive", "heartbeat_fresh")
+            ):
+                raise RecoveryError("daemon_not_healthy")
+            print(
+                json.dumps(submit_retry(DATA, args.thread_id, args.turn_id), indent=2)
+            )
+            return
         apply_command(args.command)
 
 

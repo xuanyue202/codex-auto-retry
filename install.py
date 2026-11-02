@@ -41,6 +41,8 @@ RUNTIME_FILES = (
     "codex_retry/service.py",
     "codex_retry/doctor.py",
     "codex_retry/recovery_input.py",
+    "codex_retry/owner_recovery.py",
+    "codex_retry/manual_retry.py",
 )
 
 
@@ -156,6 +158,8 @@ def install(thread=None):
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(DATA, 0o700)
     with mutation_lock(DATA):
+        if any((DATA / "requests").glob("*.request.json")):
+            raise RecoveryError("pending_recovery_reconcile_before_upgrade")
         if (cfg_path.read_bytes() if cfg_path.exists() else None) != old_cfg or (
             agent.read_bytes() if agent.exists() else None
         ) != old_agent:

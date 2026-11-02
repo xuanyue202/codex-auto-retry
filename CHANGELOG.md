@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Load an existing local thread through the public macOS thread link when owner discovery fails, once per failure and persisted before the action.
+- Recheck cancellation, Goals and retry limits before loading and before sending. Loading consumes no provider attempt and does not extend the outage deadline.
+- Add an explicit `retry` request for a current capacity failure that has never been dispatched. The installed daemon validates and handles it; duplicate, changed and uncertain requests are rejected.
+- Keep owner activation and manual-request receipts separate from observed continuation and actual work.
+
 ## 0.1.2
 
 - Send a fixed continuation instruction instead of an empty input array, so the

@@ -91,3 +91,24 @@ first automatic turn after the original completes may write the result marker;
 its turn ID, recovery origin and full model/workspace/permission context must
 match the receipt. A later manual audit cannot supply the result. Record helper
 exit, mirror cleanup and service health separately from the actual action.
+
+## Unattended acceptance with the installed daemon
+
+Use a human-authorized retained conversation. Before triggering, record a failed
+owner lookup with successful IPC initialization, the exact failed turn, current
+full context, and that no send intent or uncertain delivery exists. The target
+page must not be opened in advance. If the conversation was opened during
+diagnosis, first establish a genuinely missing owner again; do not substitute a
+fake negative response or call an already-owned run unattended acceptance.
+
+For a retained unsent real capacity failure whose automatic window expired, the
+human can explicitly request `codex-retry retry --thread-id ... --turn-id ...`.
+Use the installed launcher, not a second sending process. Record the request
+receipt, daemon PID/runtime manifest, durable activation intent, observed owner,
+single dispatch UUID, native origin, same full context, actual model/tool work
+and final turn outcome. The daemon itself must perform the loading step.
+
+An original business deadline is not reset by the explicit recovery window.
+Actual continuation may correctly perform a time check and record a missed
+window; that does not establish timely business execution. Preserve that result
+separately from the success of same-thread recovery.

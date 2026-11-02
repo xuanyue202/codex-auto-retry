@@ -2,7 +2,7 @@
 
 ## What can cause a continuation?
 
-Only a new `event_msg.task_complete` with an exact structured `server_overloaded`
+Automatic recovery requires a new `event_msg.task_complete` with an exact structured `server_overloaded`
 or `serverOverloaded` code. A quoted error in user/assistant/tool text never counts.
 Before the single mutating request, all live shards must still show that failed
 turn as terminal. New input, an active/new turn, cancellation, a changed/stopped
@@ -31,6 +31,30 @@ do not change the semantic Goal hash. The helper never writes Goal state.
 - Uses the local Unix socket and existing provider routing. No telemetry endpoint,
   credentials access, API keys, shell profile changes or global Codex config writes.
   GitHub is contacted during the explicit source download/update only.
+
+## Loading an unattended thread
+
+Owner discovery reports existing ownership; it does not load a thread. After a
+recoverable owner lookup failure, the helper rechecks the live failure, current
+preferences and limits, persists a separate activation intent, then invokes
+`/usr/bin/open -g -b com.openai.codex codex://threads/<validated-id>?hostId=local`.
+The registered URL handler navigates to the existing local thread without a
+prompt. It may switch the app window. A later scan must find an owner and readable
+settings before the normal continuation request. No provider attempt is consumed
+by navigation, and the outage deadline is unchanged. An activation intent is not
+repeated after a crash or timeout. `recover_missing_owners: false` disables it.
+
+## Explicit retry requests
+
+`retry --thread-id ... --turn-id ...` submits metadata to a private inbox; only the
+installed daemon sends the model request. Requests expire after 60 seconds and
+are bound to the enable epoch. The daemon rereads current lifecycle metadata and
+accepts only an unsent current structured capacity failure, with an eligible Goal
+and remaining attempts. A fresh explicit request can open one bounded recovery
+window for that unsent failure after the automatic deadline. Duplicate commands
+do not refresh it. Prior send intent, uncertain acceptance, a new turn/input,
+exclusion or a stopped Goal prevents replay. Business deadlines remain binding.
+Receipt acceptance is distinct from an observed start or completed work.
 
 ## Preventing duplicate work
 
