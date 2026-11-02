@@ -155,6 +155,16 @@ class OwnerRecoveryTests(unittest.TestCase):
         self.assertEqual(self.dispatch(), "desktop_route_unavailable")
         self.assertEqual(self.activations, [])
 
+    def test_opt_out_refreshed_after_lookup_also_prevents_navigation(self):
+        def refresh():
+            self.cfg["recover_missing_owners"] = False
+            return True
+
+        self.assertEqual(
+            self.dispatch(may_dispatch=refresh), "desktop_route_unavailable"
+        )
+        self.assertEqual(self.activations, [])
+
     def test_elapsed_budget_prevents_page_activation(self):
         self.clock[0] += self.cfg["max_outage_seconds"]
         self.assertEqual(self.dispatch(), "outage_timeout")

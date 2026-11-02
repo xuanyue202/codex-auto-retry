@@ -148,6 +148,7 @@ def fold_lifecycle(events):
     current_turn = None
     cancelled, cancelled_turn = False, None
     recovery_input_seen = False
+    terminal_seen, goal_changed_after_terminal = False, False
     seen_records = set()
     for e in events:
         if e.get("timestamp") is not None:
@@ -158,6 +159,8 @@ def fold_lifecycle(events):
         if e["kind"] == "thread_goal_updated":
             new_status = goal_status(e)
             changed = goal_changed(status, revision, e)
+            if terminal_seen and changed:
+                goal_changed_after_terminal = True
             status, revision = new_status, e.get("goal_revision")
             if changed and has_turn:
                 stopped_during_turn = status != "active"
@@ -182,6 +185,8 @@ def fold_lifecycle(events):
                     and e.get("turn_id") == current_turn
                 ):
                     continue
+                if e.get("turn_id") != current_turn:
+                    terminal_seen, goal_changed_after_terminal = False, False
                 recovery_input_seen = False
                 cancelled = False
                 continuation = result.get("kind") == "task_complete" and result.get(
@@ -208,6 +213,8 @@ def fold_lifecycle(events):
                 ):
                     continue
                 current_turn = e.get("turn_id") or current_turn
+                if e["kind"] == "task_complete":
+                    terminal_seen = True
             if e["kind"] in ("user_message", "turn_aborted"):
                 cancelled, cancelled_turn = True, current_turn
             result = dict(e)
@@ -227,6 +234,7 @@ def fold_lifecycle(events):
         goal_revision=revision,
         retry_goal_status=effective,
         turn_trigger=trigger,
+        goal_changed_after_terminal=goal_changed_after_terminal,
     )
     return result
 

@@ -264,6 +264,15 @@ class Engine:
             self.state["jobs"].pop(tid, None)
             old.update(attempts=0, outage_at=0)
             return
+        if latest.get("goal_changed_after_terminal"):
+            self.state["jobs"].pop(tid, None)
+            old["cancelled_failure_turn_id"] = turn
+            old["last_recovery_decision"] = {
+                "at": now,
+                "turn_id": turn,
+                "reason": "goal_updated_after_failure",
+            }
+            return
         if not goal_allows_retry(self.cfg, latest.get("retry_goal_status")):
             old["last_recovery_decision"] = {
                 "at": now,
@@ -356,6 +365,8 @@ class Engine:
             return "not_current_capacity_failure"
         if not goal_allows_retry(self.cfg, latest.get("retry_goal_status")):
             return "goal_not_retryable"
+        if latest.get("goal_changed_after_terminal"):
+            return "goal_updated_after_failure"
         old["manual_retry"] = {
             "request_id": request["request_id"],
             "failed_turn_id": turn,
@@ -495,6 +506,7 @@ class Engine:
                 and (allow_success or latest.get("capacity"))
                 and goal_allows_retry(self.cfg, latest.get("retry_goal_status"))
                 and latest.get("goal_revision") == job.get("goal_revision")
+                and not latest.get("goal_changed_after_terminal")
             )
 
         if not eligible():

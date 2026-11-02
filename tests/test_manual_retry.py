@@ -123,6 +123,39 @@ class ManualRetryTests(unittest.TestCase):
         self.assertEqual(self.process(self.submit()), "goal_not_retryable")
         self.assertNotIn(TID, self.engine.state["jobs"])
 
+    def test_active_goal_edit_after_expired_failure_is_not_new_retry_authority(self):
+        self.emit(
+            "thread_goal_updated",
+            goal={"status": "active", "objective": "a different synthetic task"},
+        )
+        self.assertEqual(self.process(self.submit()), "goal_updated_after_failure")
+        self.assertNotIn(TID, self.engine.state["jobs"])
+
+    def test_goal_edit_then_deletion_cannot_hide_changed_authority(self):
+        self.emit(
+            "thread_goal_updated", goal={"status": "active", "objective": "synthetic"}
+        )
+        self.emit("thread_goal_updated", goal=None)
+        self.assertNotEqual(self.process(self.submit()), "accepted")
+        self.assertNotIn(TID, self.engine.state["jobs"])
+
+    def test_restoring_goal_and_duplicate_terminal_do_not_revive_old_failure(self):
+        self.path.write_bytes(b"")
+        self.engine = w.Engine(self.cfg, clock=lambda: self.clock[0])
+        goal = {"status": "active", "objective": "original synthetic task"}
+        self.emit("thread_goal_updated", goal=goal)
+        self.emit("task_started")
+        self.emit("task_complete", error={"codex_error_info": "server_overloaded"})
+        self.engine.state["jobs"].clear()
+        self.emit(
+            "thread_goal_updated", goal={"status": "active", "objective": "changed"}
+        )
+        self.emit("thread_goal_updated", goal=goal)
+        self.emit("task_complete", error={"codex_error_info": "server_overloaded"})
+        self.assertNotIn(TID, self.engine.state["jobs"])
+        self.assertEqual(self.process(self.submit()), "goal_updated_after_failure")
+        self.assertNotIn(TID, self.engine.state["jobs"])
+
     def test_already_pending_failure_keeps_existing_deadline(self):
         self.engine.state["jobs"][TID] = {
             "turn_id": TURN,
