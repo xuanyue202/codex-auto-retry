@@ -25,6 +25,38 @@ def classify_capacity(error):
     return False
 
 
+def classify_failure(error):
+    """Return a bounded recovery category, never match arbitrary error text."""
+    if not isinstance(error, dict) or error.get("willRetry") is True:
+        return None
+    if classify_capacity(error):
+        return "capacity"
+    info = error.get("codex_error_info", error.get("codexErrorInfo", error.get("code")))
+    structured_detail = None
+    if isinstance(info, dict):
+        if len(info) != 1:
+            return None
+        info, structured_detail = next(iter(info.items()))
+        if structured_detail not in (None, "", {}, {"detail": "Bad Request"}):
+            return None
+    if info not in ("badRequest", "bad_request", "other"):
+        return None
+    message = error.get("message")
+    generic = message == "Bad Request"
+    if isinstance(message, str) and len(message) <= 256:
+        try:
+            generic = generic or json.loads(message) == {"detail": "Bad Request"}
+        except ValueError:
+            pass
+    if generic or (info in ("badRequest", "bad_request") and message in (None, "")):
+        # Detailed bad requests can be deterministic validation errors. Do not
+        # turn them into a retry merely because their HTTP/code category is 400.
+        if error.get("additionalDetails") or error.get("additional_details"):
+            return None
+        return "bad_request"
+    return None
+
+
 def metadata(raw):
     if not EVENT_RE.search(raw[:180]):
         return None
@@ -69,12 +101,29 @@ def metadata(raw):
             status = "unknown"
     if status is not None and not isinstance(status, str):
         status = "unknown"
+    error = p.get("error")
+    native_retry = kind == "task_complete" and (
+        p.get("willRetry") is True
+        or (isinstance(error, dict) and error.get("willRetry") is True)
+        or status in ("inProgress", "in_progress")
+    )
+    if native_retry:
+        # Keep it as a nonterminal transition: it supersedes an older queued
+        # failure without resetting this recovery chain's counters or deadline.
+        kind = "native_retry"
     # Deliberately discard text, tool contents, last_agent_message and raw errors.
+    failure = classify_failure(p.get("error"))
+    if native_retry or (
+        failure == "bad_request" and status not in (None, "failed")
+    ):
+        failure = None
     result = {
         "kind": kind,
         "turn_id": p.get("turn_id"),
         "timestamp": obj.get("timestamp"),
         "capacity": classify_capacity(p.get("error")),
+        "failure_kind": failure,
+        "recoverable": failure is not None,
         "has_error": bool(p.get("error")),
         "goal_status": status,
         "goal_present": goal_present,
@@ -166,6 +215,10 @@ def fold_lifecycle(events):
                 stopped_during_turn = status != "active"
                 ordinary_request = False
         else:
+            if e["kind"] == "native_retry":
+                if current_turn is None or e.get("turn_id") in (None, current_turn):
+                    result = dict(e, kind="task_started")
+                continue
             if (
                 not recovery_input_seen
                 and result.get("kind") == "task_started"
@@ -190,7 +243,7 @@ def fold_lifecycle(events):
                 recovery_input_seen = False
                 cancelled = False
                 continuation = result.get("kind") == "task_complete" and result.get(
-                    "capacity"
+                    "recoverable"
                 )
                 has_turn, stopped_during_turn = True, False
                 trigger = e.get("turn_trigger")
@@ -249,8 +302,13 @@ def event_timestamp(event):
 
 
 def event_key(event):
+    # These additive derived fields must not change fingerprints already saved
+    # by v0.1.2/0.1.3. An upgrade never reinterprets an already consumed failure.
+    legacy = {
+        k: v for k, v in event.items() if k not in ("recoverable", "failure_kind")
+    }
     return hashlib.sha256(
-        json.dumps(event, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 

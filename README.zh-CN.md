@@ -5,7 +5,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-在 macOS 上自动重试 Codex 桌面版的模型满载错误，沿用原会话的模型、工作目录和权限。
+在 macOS 上自动重试 Codex 桌面版的模型满载和通用 Bad Request 错误，沿用原会话的模型、工作目录和权限。
 
 任务遇到 “Selected model is at capacity” 而停止时，工具会等待片刻，再请求原会话继续。它作为 macOS 用户后台服务运行，只依赖 Python 标准库。
 
@@ -20,21 +20,23 @@
 在目标 Mac 上，把下面这句话发给 Codex：
 
 ```text
-请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/INSTALL.md 安装 Codex Auto Retry。
+请读取并按 https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.4/INSTALL.md 安装 Codex Auto Retry。
 ```
 
 也可以在终端运行固定版本的安装器：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.4/install.sh | sh
 ```
 
 运行前可以先[查看脚本](install.sh)。安装器会检查桌面连接，安装用户 LaunchAgent，并核对进程和心跳。无需 sudo 或 API Key，也不修改 shell 配置。安装过程不会提交模型请求。
 
 ## 重试规则
 
-- 只处理结构化的 `server_overloaded` 和 `serverOverloaded` 错误。登录、配额、计费、政策限制和未知错误交由用户处理。
+- 处理结构化的 `server_overloaded` 和 `serverOverloaded` 错误。0.1.4 另支持已终止回合的通用 Bad Request：`badRequest`/`bad_request` 没有具体说明或仅有通用报错，或者 `other` 搭配精确的 `Bad Request` 或 JSON 对象 `{"detail":"Bad Request"}`。具体参数校验、登录、配额、计费、政策限制及其他未知错误不重试。
 - 连续失败时，依次等待 1、2、4、8、16 秒，15 分钟内最多尝试 5 次。日志每秒检查一次，扫描和桌面请求还会增加耗时。
+- 通用 Bad Request 独立限制最多续跑 3 次，依次退避 2、5、15 秒，同时受原来的 15 分钟窗口和总计 5 次限制约束。重启或切换错误类别不会重置计数；私有配置中的 `recover_bad_requests: false` 可关闭新增类别。
+- 只响应回合终止事件；`willRetry: true` 表示宿主仍在自行重试，不另起回合。消息或工具输出中引用的报错不算触发。
 - 用户发来新消息、取消任务，或已有新回合开始时，撤销等待中的重试。仍处于 active 状态的原生 Goal 可以重试；已暂停或完成的 Goal 不会被重新激活，预算也不会重置。
 - 检查范围包括跨天会话，以及上下文压缩后产生的日志文件。首次安装和重新启用从日志当前位置开始，不补跑旧错误。
 - 目标没有可用的桌面持有者时，工具会打开一次原会话的本机链接，再重新查询持有者。这可能让 Codex 窗口切到目标会话；在私有配置中设置 `recover_missing_owners: false` 可关闭这一步。
@@ -58,13 +60,13 @@ curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/
 
 更新时，运行目标版本的安装器。已有配置、日志读取位置和发送去重记录都会保留，也支持从早期私人版迁移。存在待发送或结果不明的请求时，需要先核对结果再更新。安装器会备份原服务；新版健康检查失败时，会恢复原服务。[安装细节](INSTALL.md)。
 
-某次满载失败在发送前就已超时，需要明确要求再试一次时，可以让已安装的守护进程处理指定回合：
+某次符合条件的失败在发送前就已超时，需要明确要求再试一次时，可以让已安装的守护进程处理指定回合：
 
 ```sh
 "$HOME/.local/bin/codex-retry" retry --thread-id <thread-id> --turn-id <failed-turn-id>
 ```
 
-命令返回请求 ID，不代表已经执行。守护进程会核对原会话当前仍是这次满载失败，并在私有 `requests/` 目录记录接收结果。已经发送、结果未知、有新输入、Goal 已停止或重复提交的请求都会被拒绝。这是用户明确发起的一次有界恢复窗口，不延长业务任务自身的截止时间；仍须核对后续发送和实际工作结果。
+命令返回请求 ID，不代表已经执行。守护进程会核对原会话当前仍是这次符合条件的失败，并在私有 `requests/` 目录记录接收结果。已经发送、结果未知、有新输入、Goal 已停止或重复提交的请求都会被拒绝。这是用户明确发起的一次有界恢复窗口，不延长业务任务自身的截止时间；仍须核对后续发送和实际工作结果。
 
 ## 限制与测试结果
 

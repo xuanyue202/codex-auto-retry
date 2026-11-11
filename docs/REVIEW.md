@@ -120,3 +120,31 @@ unavailable owner, let the daemon load the retained original conversation, then
 observe one identified continuation, inherited context, actual work and the final
 turn outcome under the original business deadline. An already-opened conversation
 or a successful URL activation alone does not satisfy that acceptance.
+
+## 0.1.4 generic Bad Request recovery
+
+Both axes reviewed the changes against `efbba1f`, using the generic Bad Request
+section of docs/SPEC.md and the existing standards/safety contracts. All review
+probes used synthetic fixtures; real installation and continuation acceptance
+were performed separately.
+
+### Standards
+
+Native nonterminal retry notices no longer reset attempts or the outage window.
+The category has a separate bounded limit while retaining the overall cap.
+No remaining actionable documented-standard violations or smell findings.
+
+**Standards: 1 resolved, 0 remaining.**
+
+### Spec
+
+Structured error details are validated instead of discarded. Native retry notices
+supersede older queued failures without resetting counters, and additive derived
+metadata preserves the old event fingerprints on upgrade.
+No remaining material requirement mismatch or scope expansion.
+
+**Spec: 4 resolved, 0 remaining.**
+
+Validation: 134 synthetic tests, compilation and clean diff checks. The installed
+same-thread test completed one identified automatic continuation and a guarded
+pending action; see docs/VERIFICATION.md for its limits.

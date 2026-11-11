@@ -93,6 +93,9 @@ def status(cfg, state, now=None):
         ),
         "delays_seconds": cfg["delays_seconds"],
         "max_attempts": cfg["max_attempts"],
+        "recover_bad_requests": cfg.get("recover_bad_requests", True),
+        "bad_request_delays_seconds": cfg.get("bad_request_delays_seconds", [2, 5, 15]),
+        "bad_request_max_attempts": cfg.get("bad_request_max_attempts", 3),
         "max_outage_seconds": cfg["max_outage_seconds"],
         "last_results": {
             tid: {

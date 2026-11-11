@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.4
+
+- Recover terminal generic Bad Request failures, including `other` with the exact
+  `{"detail":"Bad Request"}` error object. Detailed validation and unsupported
+  error categories remain excluded; native `willRetry: true` is not intercepted.
+- Use separate 2/5/15-second backoff and a three-continuation limit for this
+  category, within the existing total attempt and outage limits. Counters,
+  cancellation, Goal guards and uncertain-send protection survive restart.
+- Add the `recover_bad_requests` opt-out and expose its effective limits in
+  status. Existing installation configuration and offsets remain intact.
+- Allow the isolated same-thread verifier to exercise this exact error shape;
+  synthetic verification does not establish recovery from a real provider error.
+
 ## 0.1.3
 
 - Load an existing local thread through the public macOS thread link when owner discovery fails, once per failure and persisted before the action.

@@ -2,8 +2,16 @@
 
 ## What can cause a continuation?
 
-Automatic recovery requires a new `event_msg.task_complete` with an exact structured `server_overloaded`
-or `serverOverloaded` code. A quoted error in user/assistant/tool text never counts.
+Automatic recovery requires a new terminal `event_msg.task_complete` with an
+exact structured `server_overloaded`/`serverOverloaded` code, or an eligible generic
+Bad Request. The latter accepts `badRequest`/`bad_request` with no detail or only
+the generic error, or `other` with exactly `Bad Request` or the JSON object
+`{"detail":"Bad Request"}`. Specific validation details and all other unknown
+errors remain excluded. A quoted error in user/assistant/tool text never counts.
+Events carrying `willRetry: true` are left to native retry and never dispatched.
+Bad Request permits at most three continuations with 2/5/15-second backoff, within
+the existing five-total-attempt and 15-minute outage budget. `recover_bad_requests:
+false` opts out; lower configured category limits apply even to queued jobs.
 Before the single mutating request, all live shards must still show that failed
 turn as terminal. New input, an active/new turn, cancellation, a changed/stopped
 Goal, attempt/time limit or disabled preference cancels dispatch.
@@ -49,7 +57,7 @@ repeated after a crash or timeout. `recover_missing_owners: false` disables it.
 `retry --thread-id ... --turn-id ...` submits metadata to a private inbox; only the
 installed daemon sends the model request. Requests expire after 60 seconds and
 are bound to the enable epoch. The daemon rereads current lifecycle metadata and
-accepts only an unsent current structured capacity failure, with an eligible Goal
+accepts only an unsent current eligible failure, with an eligible Goal
 and remaining attempts. A fresh explicit request can open one bounded recovery
 window for that unsent failure after the automatic deadline. Duplicate commands
 do not refresh it. Prior send intent, uncertain acceptance, a new turn/input,
@@ -72,7 +80,9 @@ This is not an exactly-once guarantee. The internal Desktop bridge lacks atomic
 compare-and-start. A user/native controller could start a turn between the final
 check and IPC mutation. Owner loss or app upgrades can break routing. Individual
 IPC requests have a 15-second absolute deadline; serial dispatch can delay other
-threads. Only recoverable capacity is automatically handled.
+threads. A generic Bad Request is not proof of a transient fault: repeated failures
+stop at the bounded limit. The helper resumes the model, never repeats a failed
+business command itself.
 
 ## Installation, update and removal
 

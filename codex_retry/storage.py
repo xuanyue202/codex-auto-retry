@@ -22,6 +22,9 @@ DEFAULT = {
     "poll_seconds": 1,
     "delays_seconds": [1, 2, 4, 8, 16],
     "max_attempts": 5,
+    "recover_bad_requests": True,
+    "bad_request_delays_seconds": [2, 5, 15],
+    "bad_request_max_attempts": 3,
     "max_outage_seconds": 900,
     "retention_days": 7,
     "recover_active_goals": True,
@@ -30,7 +33,7 @@ DEFAULT = {
     "socket_path": str(CODEX / "ipc/ipc.sock"),
     "sessions_root": str(CODEX / "sessions"),
     "exclude_thread_ids": [],
-    "scope": "desktop_owned_new_capacity_failures_only",
+    "scope": "desktop_owned_new_recoverable_failures_only",
 }
 
 
@@ -108,6 +111,16 @@ def config(data):
         raise RecoveryError("invalid_goal_recovery_setting")
     if not isinstance(cfg["recover_missing_owners"], bool):
         raise RecoveryError("invalid_owner_recovery_setting")
+    if not isinstance(cfg["recover_bad_requests"], bool):
+        raise RecoveryError("invalid_bad_request_recovery_setting")
+    if not number(cfg["bad_request_max_attempts"], 1, 3, True):
+        raise RecoveryError("invalid_bad_request_retry_limit")
+    if (
+        not isinstance(cfg["bad_request_delays_seconds"], list)
+        or not cfg["bad_request_delays_seconds"]
+        or any(not number(x, 1, 600) for x in cfg["bad_request_delays_seconds"])
+    ):
+        raise RecoveryError("invalid_bad_request_retry_delays")
     if not number(cfg["start_confirmation_seconds"], 1, 300):
         raise RecoveryError("invalid_start_confirmation_seconds")
     if not number(cfg["retention_days"], 1, 3650, True):

@@ -64,3 +64,21 @@ Acceptance must prove missing owner before recovery, automatic owner loading,
 then one identified same-thread continuation with inherited settings and actual
 work. A loaded conversation, URL-handler success, IPC ACK or a newly observed turn
 alone is insufficient. Time-sensitive work must retain its original time guards.
+
+## Generic Bad Request recovery
+
+The maintainer requested end-to-end recovery for terminal failures that report
+`codex_error_info: other` with exactly `{"detail":"Bad Request"}`. Extend the
+existing same-thread continuation mechanism, not business-action replay. Also
+accept structured `badRequest`/`bad_request` without detailed validation errors.
+Do not intercept native `willRetry: true`, active turns, quoted messages, specific
+parameter failures or authentication/policy/quota errors.
+
+Bad Request recovery uses 2/5/15-second backoff, at most three continuations,
+within the existing five-total-attempt and 15-minute limits. Persist the category
+and counter; restart, automatic input and changing categories cannot reset limits.
+Provide an opt-out, preserve prior configuration/cursors/seen state on upgrade,
+and retain every cancellation, Goal, deadline and uncertain-send guard.
+Validate synthetic detection-to-dispatch plus a bounded real same-thread test
+and actual pending-action execution. Do not trigger expired production work or
+claim that a synthetic error proves recovery from an upstream incident.

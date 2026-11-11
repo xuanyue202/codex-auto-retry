@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject overload metadata in isolation, then continue this real thread once.
+"""Inject recoverable error metadata in isolation, then continue this real thread once.
 
 Never alter real rollouts. Successful injection is not a real provider outage.
 """
@@ -243,6 +243,9 @@ def main():
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--synthetic-goal-status", choices=["active"])
+    parser.add_argument(
+        "--synthetic-error", choices=["capacity", "bad_request"], default="capacity"
+    )
     args = parser.parse_args()
     if not args.thread_id or not w.THREAD_RE.fullmatch(args.thread_id):
         raise SystemExit("A valid current test thread ID is required")
@@ -269,11 +272,11 @@ def main():
         tid, original = args.thread_id, args.after_turn
         cfg = w.config(DATA)
         evidence = {
-            "mode": "synthetic_mirror_not_real_provider_overload",
+            "mode": "synthetic_mirror_not_real_provider_error",
             "thread_id": tid,
             "original_turn_id": original,
             "dispatch_attempts": 0,
-            "error_code": "server_overloaded",
+            "error_code": args.synthetic_error,
             "synthetic_goal_status": args.synthetic_goal_status,
             "source_sha256": digest(SOURCE / "retry_watchdog.py"),
             "runtime_sha256": digest(runtime),
@@ -400,7 +403,14 @@ def main():
                     stream.write(
                         wire(
                             "task_complete",
-                            error={"codex_error_info": "server_overloaded"},
+                            error=(
+                                {
+                                    "codex_error_info": "other",
+                                    "message": '{"detail":"Bad Request"}',
+                                }
+                                if args.synthetic_error == "bad_request"
+                                else {"codex_error_info": "server_overloaded"}
+                            ),
                         )
                     )
                     stream.flush()

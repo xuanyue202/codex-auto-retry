@@ -5,7 +5,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Automatically retries model-capacity failures in the same Codex Desktop conversation, preserving its model, workspace and permissions.
+Automatically retries model-capacity and generic Bad Request failures in the same Codex Desktop conversation, preserving its model, workspace and permissions.
 
 When a task stops with “Selected model is at capacity,” the helper waits briefly and requests a continuation. It runs as a macOS user background service and uses only the Python standard library.
 
@@ -20,21 +20,23 @@ When a task stops with “Selected model is at capacity,” the helper waits bri
 Ask Codex on the target Mac to install it:
 
 ```text
-Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/INSTALL.md
+Install Codex Auto Retry by reading and following https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.4/INSTALL.md
 ```
 
 Or run the versioned installer in Terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.3/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/xuanyue202/codex-auto-retry/v0.1.4/install.sh | sh
 ```
 
 You can [inspect the script](install.sh) before running it. Installation checks the Desktop connection, installs a user LaunchAgent and verifies its process and heartbeat. It requires no sudo, API key or shell profile changes. Installation does not send a model request.
 
 ## Retry behavior
 
-- Only structured `server_overloaded` or `serverOverloaded` errors trigger a retry. Authentication, quota, billing, policy and unknown errors are left for the user to resolve.
+- Structured `server_overloaded` or `serverOverloaded` errors trigger a retry. Version 0.1.4 also handles terminal generic Bad Request errors: `badRequest`/`bad_request` with no detail or a generic message, or `other` with exactly `Bad Request` or the JSON object `{"detail":"Bad Request"}`. Detailed validation errors, authentication, quota, billing, policy and other unknown errors are not retried.
 - Successive failures use 1, 2, 4, 8 and 16 seconds of backoff, with at most five attempts in 15 minutes. Logs are checked once per second; scanning and Desktop requests add latency.
+- Generic Bad Request failures have a separate limit of three continuations, using 2/5/15-second backoff within the same 15-minute window and five-attempt overall cap. Restarting the helper or changing between error categories does not reset those counters. Set `recover_bad_requests: false` in the private configuration to opt out.
+- Only a terminal failure can trigger recovery. A server error with `willRetry: true` is left to the native running turn; quoted errors in messages or tool output never count.
 - New user input, cancellation or a new active turn cancels the pending retry. Active native Goals are eligible; paused or completed Goals are not reactivated and their budgets are not reset.
 - The helper checks live logs across dates and context-compaction files. First installation and re-enabling start at the current end of logs, so old failures are not replayed.
 - If the target has no reachable Desktop owner, the helper opens its existing local thread link once, then queries the owner again. This may switch the Codex window to that conversation. Set `recover_missing_owners` to `false` in the private configuration to opt out.
@@ -58,7 +60,7 @@ If `~/.local/bin` is on your PATH, you can use `codex-retry` directly. The servi
 
 To update, run the installer for the release you want. Updates preserve configuration, log offsets and dispatch deduplication, including migration from the earlier private macOS build. Pending or uncertain dispatches must be resolved before updating. The installer backs up the existing service and restores it if the new service fails its health check. [Installation details](INSTALL.md).
 
-For a specific capacity failure that timed out before any request was sent, an explicit user request can ask the installed daemon to retry it once:
+For a specific eligible failure that timed out before any request was sent, an explicit user request can ask the installed daemon to retry it once:
 
 ```sh
 "$HOME/.local/bin/codex-retry" retry --thread-id <thread-id> --turn-id <failed-turn-id>

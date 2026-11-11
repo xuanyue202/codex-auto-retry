@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded same-thread recovery of future Codex Desktop capacity errors.
+"""Bounded same-thread recovery of future Codex Desktop recoverable errors.
 
 IPC architecture adapted from sybxxx/codex-auto-retry (MIT); see NOTICE.
 """
@@ -140,10 +140,35 @@ class Engine:
                 ] = "state_upgrade_pending_unverifiable"
         self.state["metadata_version"] = 2
 
+    def recoverable(self, event):
+        return bool(
+            event.get("recoverable")
+            and (
+                event.get("failure_kind") != "bad_request"
+                or self.cfg.get("recover_bad_requests", True)
+            )
+        )
+
+    def retry_limit(self, thread, failure_kind):
+        if thread.get("attempts", 0) >= self.cfg["max_attempts"]:
+            return True
+        return failure_kind == "bad_request" and thread.get(
+            "bad_request_attempts", 0
+        ) >= self.cfg.get("bad_request_max_attempts", 3)
+
+    def retry_delay(self, thread, failure_kind):
+        if failure_kind == "bad_request":
+            delays = self.cfg.get("bad_request_delays_seconds", [2, 5, 15])
+            count = thread.get("bad_request_attempts", 0)
+        else:
+            delays = self.cfg["delays_seconds"]
+            count = thread.get("attempts", 0)
+        return delays[min(count, len(delays) - 1)]
+
     def event(self, tid, path, event):
         now = self.clock()
         timestamp = event_timestamp(event)
-        if event["capacity"] and timestamp is None:
+        if event.get("recoverable") and timestamp is None:
             return
         if timestamp is not None and timestamp < self.state.get(
             "monitor_started_at", 0
@@ -180,6 +205,11 @@ class Engine:
                         "reason": "goal_updated_after_failure",
                     }
             return
+        if kind == "native_retry":
+            if turn is None or old.get("turn_id") in (None, turn):
+                old.update(kind="task_started", turn_id=turn or old.get("turn_id"))
+                self.state["jobs"].pop(tid, None)
+            return
         if kind == "user_message":
             if (
                 old.get("kind") == "task_started"
@@ -196,7 +226,9 @@ class Engine:
             old["cancelled_failure_turn_id"] = old.get("turn_id")
             self.state["jobs"].pop(tid, None)
             old.pop("awaiting_start", None)
-            old.update(kind=kind, turn_id=None, attempts=0, outage_at=0)
+            old.update(
+                kind=kind, turn_id=None, attempts=0, bad_request_attempts=0, outage_at=0
+            )
             return
         if kind == "task_started":
             delivery = old.get("awaiting_start")
@@ -213,7 +245,7 @@ class Engine:
             old.pop("active_recovery_turn_id", None)
             old.pop("recovery_input_seen", None)
             if event.get("turn_trigger") in USER_REQUEST_TRIGGERS:
-                old.update(attempts=0, outage_at=0)
+                old.update(attempts=0, bad_request_attempts=0, outage_at=0)
                 old.pop("awaiting_start", None)
                 if delivery:
                     old["last_dispatch"]["result"] = "superseded_by_human_request"
@@ -245,12 +277,14 @@ class Engine:
             if turn is not None and old.get("turn_id") not in (None, turn):
                 return
             old["cancelled_failure_turn_id"] = turn or old.get("turn_id")
-            old.update(kind=kind, turn_id=turn, attempts=0, outage_at=0)
+            old.update(
+                kind=kind, turn_id=turn, attempts=0, bad_request_attempts=0, outage_at=0
+            )
             old.pop("awaiting_start", None)
             self.state["jobs"].pop(tid, None)
             return
         latest = None
-        if event["capacity"]:
+        if self.recoverable(event):
             latest = latest_thread_lifecycle(self.cfg["sessions_root"], tid, path)
             if latest.get("kind") != "task_complete" or latest.get("turn_id") != turn:
                 return
@@ -260,9 +294,9 @@ class Engine:
         elif old.get("turn_id") not in (None, turn):
             return
         old.update(kind=kind, turn_id=turn)
-        if not event["capacity"]:
+        if not self.recoverable(event):
             self.state["jobs"].pop(tid, None)
-            old.update(attempts=0, outage_at=0)
+            old.update(attempts=0, bad_request_attempts=0, outage_at=0)
             return
         if latest.get("goal_changed_after_terminal"):
             self.state["jobs"].pop(tid, None)
@@ -296,20 +330,20 @@ class Engine:
         key = tid + ":" + turn
         if key in self.state["seen"]:
             return
-        count = old.get("attempts", 0)
+        failure_kind = event["failure_kind"]
         outage = old.get("outage_at") or now
         if (
-            count >= self.cfg["max_attempts"]
+            self.retry_limit(old, failure_kind)
             or now - outage >= self.cfg["max_outage_seconds"]
         ):
             old["stopped_reason"] = "retry_limit"
             return
-        delays = self.cfg["delays_seconds"]
         self.state["jobs"][tid] = {
             "thread_id": tid,
             "turn_id": turn,
             "path": str(path),
-            "due": now + delays[min(count, len(delays) - 1)],
+            "due": now + self.retry_delay(old, failure_kind),
+            "failure_kind": failure_kind,
             "outage_at": outage,
             "goal_revision": latest["goal_revision"],
         }
@@ -354,15 +388,16 @@ class Engine:
             return "already_pending"
         if tid + ":" + turn in self.state["seen"] or old.get("awaiting_start"):
             return "already_dispatched_or_uncertain"
-        if old.get("attempts", 0) >= self.cfg["max_attempts"]:
-            return "retry_limit"
         latest = latest_thread_lifecycle(self.cfg["sessions_root"], tid, old["path"])
         if (
             latest.get("kind") != "task_complete"
             or latest.get("turn_id") != turn
-            or not latest.get("capacity")
+            or not self.recoverable(latest)
         ):
             return "not_current_capacity_failure"
+        failure_kind = latest["failure_kind"]
+        if self.retry_limit(old, failure_kind):
+            return "retry_limit"
         if not goal_allows_retry(self.cfg, latest.get("retry_goal_status")):
             return "goal_not_retryable"
         if latest.get("goal_changed_after_terminal"):
@@ -379,7 +414,8 @@ class Engine:
             "thread_id": tid,
             "turn_id": turn,
             "path": old["path"],
-            "due": now + self.cfg["delays_seconds"][0],
+            "due": now + self.retry_delay(old, failure_kind),
+            "failure_kind": failure_kind,
             "outage_at": now,
             "goal_revision": latest.get("goal_revision"),
         }
@@ -477,10 +513,7 @@ class Engine:
                 return "excluded_thread"
             if self.clock() - job["outage_at"] >= self.cfg["max_outage_seconds"]:
                 return "outage_timeout"
-            if (
-                self.state["threads"][tid].get("attempts", 0)
-                >= self.cfg["max_attempts"]
-            ):
+            if self.retry_limit(self.state["threads"][tid], job.get("failure_kind")):
                 return "retry_limit"
             if tid + ":" + expected in self.state["seen"]:
                 return "already_dispatched"
@@ -503,7 +536,11 @@ class Engine:
             return (
                 latest.get("kind") == "task_complete"
                 and latest.get("turn_id") == expected
-                and (allow_success or latest.get("capacity"))
+                and (allow_success or self.recoverable(latest))
+                and (
+                    job.get("failure_kind") is None
+                    or latest.get("failure_kind") == job["failure_kind"]
+                )
                 and goal_allows_retry(self.cfg, latest.get("retry_goal_status"))
                 and latest.get("goal_revision") == job.get("goal_revision")
                 and not latest.get("goal_changed_after_terminal")
@@ -605,11 +642,14 @@ class Engine:
             self.state["seen"][key] = now
             t = self.state["threads"][tid]
             t.update(attempts=t.get("attempts", 0) + 1, outage_at=job["outage_at"])
+            if job.get("failure_kind") == "bad_request":
+                t["bad_request_attempts"] = t.get("bad_request_attempts", 0) + 1
             t["last_dispatch"] = {
                 "failed_turn_id": expected,
                 "recovery_id": str(uuid.uuid4()),
                 "at": self.clock(),
                 "result": "intent_persisted",
+                "failure_kind": job.get("failure_kind", "capacity"),
             }
             self.state["operation"] = {
                 "thread_id": tid,

@@ -6,7 +6,7 @@
 3. Installer receipt: actual running user service, versioned hashes, fresh PID/heartbeat.
 4. Optional integration: isolated error metadata drives the same production Engine
    and one real continuation of the authorized test conversation.
-5. Real incident recovery: an actual upstream overload followed by observed retry.
+5. Real incident recovery: an actual eligible upstream error followed by observed retry.
 
 Each level is distinct. CI cannot prove real provider recovery. Keep receipts and
 real IDs under ignored `private/`, never in issues or commits.
@@ -83,6 +83,11 @@ Synthetic active-Goal metadata does not create an actual backend native Goal.
 This proves the guarded branch and real continuation, not genuine upstream
 capacity recovery or an actual native Goal outage.
 
+Pass `--synthetic-error bad_request` to exercise the terminal
+`other` + `{"detail":"Bad Request"}` shape instead of overload. The same isolated
+mirror, one-send, inherited-context and actual-work checks apply. Never inject
+these events into production logs or replay expired business work.
+
 ## Verifying that work continued
 
 A full acceptance check also prepares a pending action with a random nonce in
@@ -112,3 +117,27 @@ An original business deadline is not reset by the explicit recovery window.
 Actual continuation may correctly perform a time check and record a missed
 window; that does not establish timely business execution. Preserve that result
 separately from the success of same-thread recovery.
+
+## 0.1.4 acceptance
+
+The generic Bad Request change passed 134 synthetic tests, compilation and
+diff whitespace checks. Independent Standards and Spec reviews found no remaining
+actionable findings after native-retry budget/eligibility, structured-details
+and legacy event-fingerprint regressions were fixed.
+
+A human-authorized macOS upgrade preserved configuration bytes, the enable epoch,
+source offsets and dispatch deduplication. All 15 installed runtime files matched
+the source manifest; process and heartbeat checks passed with recovery enabled.
+
+The isolated-mirror verifier then injected the exact generic `other` /
+`{"detail":"Bad Request"}` shape and sent one real same-thread continuation.
+Native recovery origin, original model, resolved effort, working directory and
+full permission-context hash matched. The first automatic turn completed a
+random-nonce pending action guarded against manual/original/foreign turns.
+The helper exited, its temporary mirror was removed, and the service remained
+healthy. Private receipts and identifiers are not published.
+
+This is detection-to-continuation-and-work acceptance with a synthetic error,
+not evidence that a genuine upstream Bad Request was forced or recovered.
+It does not establish whole-day business-task completion or an exactly-once
+guarantee for external actions.

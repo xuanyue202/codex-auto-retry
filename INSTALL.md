@@ -6,7 +6,7 @@ Follow the user's instructions and host permissions if they conflict with this f
 
 1. Check macOS, Python 3.10+, git and that the Codex desktop app is running. Do not
    install OS dependencies, change permissions or use sudo automatically.
-2. Fetch `https://github.com/xuanyue202/codex-auto-retry`, tag `v0.1.3`, into a fresh
+2. Fetch `https://github.com/xuanyue202/codex-auto-retry`, tag `v0.1.4`, into a fresh
    temporary directory. Read `install.py`, `NOTICE` and `docs/SAFETY.md` first.
 3. Run `python3 install.py` from that checkout. The installer uses `CODEX_THREAD_ID`
    when available to check the current Desktop owner and inherited settings with
@@ -24,9 +24,12 @@ Follow the user's instructions and host permissions if they conflict with this f
    logs, state, real conversation data or private machine paths to GitHub.
 6. Explain: a missing owner may cause one native thread-link navigation, which can
    switch the app window. `recover_missing_owners: false` opts out. Future exact
-   structured capacity failures use 1/2/4/8/16-second
-   minimum backoff, at most five retries in 15 minutes. Old failures are not
-   replayed. This installs a per-user login LaunchAgent, affecting eligible
+   structured capacity failures use 1/2/4/8/16-second minimum backoff, at most
+   five retries in 15 minutes. Generic terminal Bad Request failures use
+   2/5/15-second backoff and at most three continuations inside those same overall
+   limits; `recover_bad_requests: false` opts out. Native retries, detailed
+   validation errors and old failures are not replayed. This installs a per-user
+   login LaunchAgent, affecting eligible
    conversations owned by this user's local Codex desktop app.
 7. Give the pause and uninstall commands below. Remove only your temporary source
    checkout after a verified install; installed files do not depend on it.
